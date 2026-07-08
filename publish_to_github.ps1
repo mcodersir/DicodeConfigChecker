@@ -312,14 +312,43 @@ function Remove-ExistingAsset($AssetName) {
   }
 }
 
+function Get-ReleaseUploadBase {
+  if (-not $release -or -not $release.upload_url) {
+    Write-Warn "Release upload_url is missing. Re-loading release by tag..."
+    $script:release = Invoke-GitHubJson "GET" "https://api.github.com/repos/$Owner/$RepoName/releases/tags/$Tag" $token
+  }
+
+  $rawUploadUrl = [string]$script:release.upload_url
+  if (-not $rawUploadUrl -or $rawUploadUrl.Trim().Length -eq 0) {
+    Fail "GitHub release upload_url is empty. Release could not be used for asset upload."
+  }
+
+  # GitHub returns a URI template like:
+  # https://uploads.github.com/repos/OWNER/REPO/releases/ID/assets{?name,label}
+  # Invoke-RestMethod needs a real URI, so remove the template part first.
+  $uploadBase = $rawUploadUrl -replace "\{.*\}$", ""
+
+  if ($uploadBase -notmatch "^https://") {
+    Fail "Invalid GitHub asset upload URL: $rawUploadUrl"
+  }
+
+  return $uploadBase
+}
+
 function Upload-Asset($Path, $Name, $ContentType) {
   if (-not (Test-Path $Path)) { Fail "Asset not found: $Path" }
   Remove-ExistingAsset $Name
-  $uploadBase = $release.upload_url -replace "\{\?name,label\}", ""
-  $uri = "$uploadBase?name=$([uri]::EscapeDataString($Name))"
+
+  $uploadBase = Get-ReleaseUploadBase
+  $encodedName = [uri]::EscapeDataString($Name)
+  $uri = ("{0}?name={1}" -f $uploadBase, $encodedName)
+
+  Write-Warn "Upload URL: $uri"
   Invoke-GitHubRaw "POST" $uri $token $ContentType $Path | Out-Null
   Write-Ok "Uploaded: $Name"
 }
+
+$script:release = $release
 
 Write-Step "Uploading release assets"
 Upload-Asset "dist\DicodeConfigChecker.exe" "DicodeConfigChecker-v1.0.0-windows.exe" "application/octet-stream"
