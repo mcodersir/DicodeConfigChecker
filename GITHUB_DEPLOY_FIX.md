@@ -68,3 +68,40 @@ Required token permissions:
 - Classic PAT: `repo` + `workflow`
 - Fine-grained PAT: repository selected, `Contents: Read and write`, `Workflows: Read and write`
 
+
+## DNS / Git push fix
+
+If deploy fails with:
+
+```text
+Could not resolve host: github.com
+```
+
+run:
+
+```bat
+diagnose_git_github_dns_proxy.bat
+```
+
+Then rerun:
+
+```bat
+deploy_via_github_actions_v1_0_1.bat
+```
+
+and enter one working Git proxy, for example:
+
+```text
+http://127.0.0.1:10809
+http://127.0.0.1:7890
+socks5h://127.0.0.1:10808
+socks5h://127.0.0.1:7891
+```
+
+Use `socks5h://` when using a SOCKS proxy because it sends DNS resolution through the proxy too. This matters when Windows cannot resolve `github.com` directly.
+
+If you previously set a broken global Git proxy, run:
+
+```bat
+clear_bad_git_proxy.bat
+```

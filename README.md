@@ -145,3 +145,19 @@ deploy_via_github_actions_v1_0_1.bat
 ```
 
 The script now creates or replaces the tag safely with `git tag -f -a` and pushes `refs/tags/v1.0.1 --force`.
+
+## Deploy when Git cannot resolve github.com
+
+If you see `Could not resolve host: github.com`, run:
+
+```bat
+diagnose_git_github_dns_proxy.bat
+```
+
+Then run:
+
+```bat
+deploy_via_github_actions_v1_0_1.bat
+```
+
+and enter your local Git proxy, for example `http://127.0.0.1:10809` or `socks5h://127.0.0.1:10808`.
