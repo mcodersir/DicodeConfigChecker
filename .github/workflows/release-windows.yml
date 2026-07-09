@@ -1,0 +1,118 @@
+name: Build and Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, for example v1.0.1'
+        required: true
+        default: 'v1.0.1'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.tag }}' } else { '${{ github.ref_name }}' }
+          if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
+          $version = $tag.TrimStart('v')
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Tag: $tag"
+          Write-Host "Version: $version"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build requirements
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Download and bundle Xray core
+        shell: pwsh
+        run: |
+          python engine.py --download-xray-only
+          if (-not (Test-Path "core\xray.exe")) {
+            Write-Warning "core\xray.exe was not downloaded. Build continues without bundled Xray."
+          }
+
+      - name: Build Windows one-file EXE
+        shell: pwsh
+        run: |
+          $xrayArgs = @()
+          if (Test-Path "core\xray.exe") {
+            $xrayArgs += @("--add-binary", "core\xray.exe;core")
+          }
+          python -m PyInstaller --noconfirm --clean --onefile --windowed `
+            --name DicodeConfigChecker `
+            --icon "assets\app.ico" `
+            @xrayArgs `
+            --add-data "assets;assets" `
+            app.py
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item "dist\DicodeConfigChecker.exe" "release\DicodeConfigChecker-v${{ steps.version.outputs.version }}-windows.exe" -Force
+          $exclude = @(".git", "build", "dist", "release", "__pycache__", ".pytest_cache")
+          $items = Get-ChildItem -Force | Where-Object { $exclude -notcontains $_.Name }
+          Compress-Archive -Path $items.FullName -DestinationPath "release\DicodeConfigChecker-source-v${{ steps.version.outputs.version }}.zip" -Force
+
+      - name: Remove old release artifacts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete v1.0.0 --cleanup-tag --yes 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "No old v1.0.0 release to delete." }
+
+          gh release delete ${{ steps.version.outputs.tag }} --yes 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "No existing ${{ steps.version.outputs.tag }} release to delete." }
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $version = "${{ steps.version.outputs.version }}"
+          $notes = @"
+          # Dicode Config Checker $tag
+
+          ## فارسی
+          - لیست کامل جدید کانال‌های رتبه دوم جایگزین شد.
+          - خروجی‌ها از تنظیمات جدا شدند: ساخت sub.txt برای کانفیگ‌ها و ساخت proxy.txt برای پروکسی‌ها مستقل است.
+          - حالت فقط پروکسی اضافه شد: گزینه بررسی کانفیگ‌های V2Ray/Xray را خاموش و بررسی پروکسی‌های تلگرام را روشن بگذار.
+          - نسخه قبلی v1.0.0 و تگ آن قبل از انتشار نسخه جدید حذف می‌شود.
+          - EXE ویندوزی روی GitHub Actions ساخته می‌شود، نه روی سیستم محلی.
+
+          ## Assets
+          - DicodeConfigChecker-v$version-windows.exe
+          - DicodeConfigChecker-source-v$version.zip
+          "@
+          $notes | Set-Content -Encoding UTF8 release-notes-generated.md
+          gh release create $tag `
+            "release\DicodeConfigChecker-v$version-windows.exe" `
+            "release\DicodeConfigChecker-source-v$version.zip" `
+            --title "Dicode Config Checker $tag" `
+            --notes-file release-notes-generated.md

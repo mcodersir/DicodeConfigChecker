@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import base64
+import ctypes
+import html as html_lib
 import concurrent.futures
+from concurrent.futures import FIRST_COMPLETED, wait
 import json
 import os
 import sys
@@ -12,6 +15,7 @@ import time
 import webbrowser
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from collections import deque
 from pathlib import Path
 from threading import Event
 from typing import Any, Optional
@@ -39,6 +43,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -56,7 +61,8 @@ APP_VERSION = engine.VERSION
 class RunSettings:
     per_channel_limit: int
     main_channel_limit: int
-    main_channel: str
+    priority1_channels_text: str
+    priority2_channels_text: str
     fetch_workers: int
     fetch_timeout: float
     test_mode: str
@@ -70,9 +76,10 @@ class RunSettings:
     check_url: str
     sub_tag_prefix: str
     rename_config_names: bool
+    check_v2ray_configs: bool
+    check_telegram_proxies: bool
     prefilter_enabled: bool
     prefilter_workers: int
-    channels_text: str
 
 
 class CheckerWorker(QThread):
@@ -81,6 +88,7 @@ class CheckerWorker(QThread):
     progress = Signal(int, int)
     counters = Signal(int, int, int, int)
     ask_disconnect = Signal()
+    paused = Signal()
     finished_ok = Signal(dict)
     failed = Signal(str)
 
@@ -88,13 +96,29 @@ class CheckerWorker(QThread):
         super().__init__()
         self.settings = settings
         self._continue_event = Event()
+        self._resume_event = Event()
+        self._resume_event.set()
         self._stop_requested = False
+        self._abort_requested = False
+        self._pause_requested = False
 
     def continue_after_disconnect(self) -> None:
         self._continue_event.set()
 
+    def resume_after_pause(self) -> None:
+        self._pause_requested = False
+        self._resume_event.set()
+
     def request_stop(self) -> None:
+        # Soft stop: pause after current in-flight checks and keep partial outputs.
+        self._pause_requested = True
+        self._resume_event.clear()
+
+    def request_abort(self) -> None:
+        self._abort_requested = True
         self._stop_requested = True
+        self._pause_requested = False
+        self._resume_event.set()
         self._continue_event.set()
 
     def emit_log(self, text: str) -> None:
@@ -118,22 +142,23 @@ class CheckerWorker(QThread):
             else:
                 self.emit_log("Xray پیدا نشد؛ در حالت auto از TCP fallback استفاده می‌شود.")
 
-            if self._stop_requested:
+            if self._abort_requested:
                 return
 
             self.collect_stage1()
-            if self._stop_requested:
+            if self._abort_requested:
                 return
 
             self.stage_text.emit("منتظر قطع اتصال")
             self.emit_log("مرحله دریافت تمام شد. اتصال فعلی را کامل قطع کنید، سپس ادامه را بزنید.")
             self.ask_disconnect.emit()
             self._continue_event.wait()
-            if self._stop_requested:
+            if self._abort_requested:
                 return
 
             final_report = self.test_stage2(xray_path)
-            self.finished_ok.emit(final_report)
+            if not self._abort_requested:
+                self.finished_ok.emit(final_report)
         except Exception as exc:
             try:
                 engine.log("GUI FATAL: " + repr(exc))
@@ -145,7 +170,10 @@ class CheckerWorker(QThread):
         s = self.settings
         engine.PER_CHANNEL_LIMIT = s.per_channel_limit
         engine.MAIN_CHANNEL_LIMIT = s.main_channel_limit
-        engine.MAIN_CHANNEL = s.main_channel.strip() or "persianvpnhub"
+        priority_one = self.normalize_channel_text(s.priority1_channels_text)
+        priority_two = self.normalize_channel_text(s.priority2_channels_text)
+        engine.MAIN_CHANNELS = {(engine.normalize_channel(x) or x.replace("t.me/", "")).lower() for x in priority_one}
+        engine.MAIN_CHANNEL = next(iter(engine.MAIN_CHANNELS), "persianvpnhub")
         engine.FETCH_WORKERS = s.fetch_workers
         engine.FETCH_TIMEOUT = s.fetch_timeout
         engine.TEST_MODE = s.test_mode
@@ -159,9 +187,11 @@ class CheckerWorker(QThread):
         engine.CHECK_URL = s.check_url.strip() or "http://www.gstatic.com/generate_204"
         engine.SUB_TAG_PREFIX = s.sub_tag_prefix.strip() or "t.me/dicodeir"
         engine.RENAME_CONFIG_NAMES = bool(s.rename_config_names)
+        engine.CHECK_V2RAY_CONFIGS = bool(s.check_v2ray_configs)
+        engine.CHECK_TELEGRAM_PROXIES = bool(s.check_telegram_proxies)
 
-        channel_lines = self.normalize_channel_text(s.channels_text)
-        engine.CHANNELS_FILE.write_text("\n".join(channel_lines) + "\n", encoding="utf-8")
+        combined_lines = self.merge_priority_channels(priority_one, priority_two)
+        engine.CHANNELS_FILE.write_text("\n".join(combined_lines) + "\n", encoding="utf-8")
         self.write_env_file(s)
 
     @staticmethod
@@ -183,11 +213,27 @@ class CheckerWorker(QThread):
         return out
 
     @staticmethod
+    def merge_priority_channels(priority_one: list[str], priority_two: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for group in (priority_one, priority_two):
+            for line in group:
+                ch = engine.normalize_channel(line)
+                if not ch:
+                    continue
+                key = ch.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(f"t.me/{ch}")
+        return out
+
+    @staticmethod
     def write_env_file(s: RunSettings) -> None:
         text = f"""# Dicode Config Checker v1 settings
 PER_CHANNEL_LIMIT={s.per_channel_limit}
 MAIN_CHANNEL_LIMIT={s.main_channel_limit}
-MAIN_CHANNEL={s.main_channel}
+MAIN_CHANNELS={",".join([engine.normalize_channel(x) or x.replace("t.me/", "") for x in CheckerWorker.normalize_channel_text(s.priority1_channels_text)])}
 FETCH_WORKERS={s.fetch_workers}
 FETCH_TIMEOUT={s.fetch_timeout}
 TEST_MODE={s.test_mode}
@@ -206,6 +252,8 @@ TCP_TIMEOUT={s.tcp_timeout}
 ATTEMPT_GAP_SECONDS=0.12
 SUB_TAG_PREFIX={s.sub_tag_prefix}
 RENAME_CONFIG_NAMES={1 if s.rename_config_names else 0}
+CHECK_V2RAY_CONFIGS={1 if s.check_v2ray_configs else 0}
+CHECK_TELEGRAM_PROXIES={1 if s.check_telegram_proxies else 0}
 WRITE_DEAD_TO_REPORT=1
 """
         engine.ENV_FILE.write_text(text, encoding="utf-8")
@@ -215,7 +263,7 @@ WRITE_DEAD_TO_REPORT=1
         channels = engine.read_channels()
         total = max(len(channels), 1)
         self.progress.emit(0, total)
-        self.emit_log(f"کانال‌ها: {len(channels)} | هر کانال: {engine.PER_CHANNEL_LIMIT} | اصلی: {engine.MAIN_CHANNEL_LIMIT}")
+        self.emit_log(f"کانال‌ها: {len(channels)} | رتبه دوم: {engine.PER_CHANNEL_LIMIT} | رتبه اول: {engine.MAIN_CHANNEL_LIMIT} | تعداد رتبه اول: {len(getattr(engine, 'MAIN_CHANNELS', []))}")
 
         results: list[dict[str, Any]] = []
         collected: list[dict[str, str]] = []
@@ -226,7 +274,7 @@ WRITE_DEAD_TO_REPORT=1
         with concurrent.futures.ThreadPoolExecutor(max_workers=engine.FETCH_WORKERS) as ex:
             future_map = {ex.submit(engine.fetch_channel, ch): ch for ch in channels}
             for fut in concurrent.futures.as_completed(future_map):
-                if self._stop_requested:
+                if self._abort_requested:
                     break
                 res = fut.result()
                 results.append(res)
@@ -250,7 +298,7 @@ WRITE_DEAD_TO_REPORT=1
             "stage": 1,
             "channels": len(channels),
             "per_channel_limit": engine.PER_CHANNEL_LIMIT,
-            "main_channel": engine.MAIN_CHANNEL,
+            "priority_one_channels": sorted(getattr(engine, "MAIN_CHANNELS", [])),
             "main_channel_limit": engine.MAIN_CHANNEL_LIMIT,
             "unique_configs": len(lines),
             "elapsed_seconds": elapsed,
@@ -285,72 +333,9 @@ WRITE_DEAD_TO_REPORT=1
                     self.emit_log(f"Prefilter {done}/{total} | قابل تست={len(kept)} | رد شده={len(rejected)}")
         return kept, rejected
 
-    def test_stage2(self, xray_path: Optional[Path]) -> dict[str, Any]:
-        self.stage_text.emit("تست واقعی")
-        items = engine.read_stage1_configs()
-        endpoints: list[Any] = []
-        unsupported: list[str] = []
-
-        for item in items:
-            ep = engine.parse_endpoint(item["raw"], item.get("source", "stage1"))
-            if ep:
-                endpoints.append(ep)
-            else:
-                unsupported.append(item["raw"])
-
-        self.emit_log(f"خوانده‌شده: {len(items)} | قابل تست: {len(endpoints)} | پشتیبانی‌نشده: {len(unsupported)}")
-        endpoints, prefiltered_dead = self.tcp_prefilter(endpoints)
-
-        total = max(len(endpoints), 1)
-        self.progress.emit(0, total)
-        results: list[Any] = []
-        done = 0
-        dead_count = len(prefiltered_dead)
-        start = time.time()
-
-        prefilter_results = [
-            engine.TestResult(
-                raw=ep.raw,
-                source=ep.source,
-                kind=ep.kind,
-                protocol=ep.protocol,
-                host=ep.host,
-                port=ep.port,
-                ok=False,
-                ping_ms=None,
-                min_ms=None,
-                avg_ms=None,
-                attempts=1,
-                success_count=0,
-                samples_ms=[],
-                tester="tcp-prefilter",
-                error="tcp_prefilter_failed",
-            )
-            for ep in prefiltered_dead
-        ]
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=engine.PING_WORKERS) as ex:
-            futs = [ex.submit(engine.repeated_test, ep, xray_path) for ep in endpoints]
-            for fut in concurrent.futures.as_completed(futs):
-                if self._stop_requested:
-                    break
-                res = fut.result()
-                results.append(res)
-                done += 1
-                if res.ok:
-                    self.emit_log(f"OK {res.protocol} {res.host}:{res.port} | {engine.fmt_ms(res.ping_ms)} | {res.success_count}/{res.attempts} | {res.tester}")
-                else:
-                    dead_count += 1
-                alive_configs_live = len([r for r in results if r.ok and r.kind != "mtproto"])
-                alive_proxies_live = len([r for r in results if r.ok and r.kind == "mtproto"])
-                self.progress.emit(done, total)
-                self.counters.emit(alive_configs_live, alive_proxies_live, dead_count, len(unsupported))
-
-        results.extend(prefilter_results)
-        elapsed = int(time.time() - start)
+    def write_partial_outputs(self, results: list[Any], unsupported: list[str], elapsed: int, xray_path: Optional[Path]) -> dict[str, Any]:
         alive = sorted([r for r in results if r.ok], key=lambda r: r.ping_ms if r.ping_ms is not None else 999999)
         dead = [r for r in results if not r.ok]
-
         alive_configs = [r for r in alive if r.kind != "mtproto"]
         alive_proxies = [r for r in alive if r.kind == "mtproto"]
         dead_configs = [r for r in dead if r.kind != "mtproto"]
@@ -372,7 +357,6 @@ WRITE_DEAD_TO_REPORT=1
         engine.SUB_BASE64_FILE.write_text(base64.b64encode(("\n".join(sub_lines)).encode("utf-8")).decode("ascii"), encoding="utf-8")
         engine.PROXY_FILE.write_text("\n".join(proxy_lines) + ("\n" if proxy_lines else ""), encoding="utf-8")
         engine.PROXY_BASE64_FILE.write_text(base64.b64encode(("\n".join(proxy_lines)).encode("utf-8")).decode("ascii"), encoding="utf-8")
-
         engine.write_reports(renamed_config_items, alive_proxies, dead_configs, dead_proxies, unsupported, elapsed, xray_path)
 
         full = {
@@ -382,8 +366,10 @@ WRITE_DEAD_TO_REPORT=1
             "settings": {
                 "per_channel_limit": engine.PER_CHANNEL_LIMIT,
                 "main_channel_limit": engine.MAIN_CHANNEL_LIMIT,
-                "main_channel": engine.MAIN_CHANNEL,
+                "priority_one_channels": sorted(getattr(engine, "MAIN_CHANNELS", [])),
                 "rename_config_names": engine.RENAME_CONFIG_NAMES,
+                "check_v2ray_configs": self.settings.check_v2ray_configs,
+                "check_telegram_proxies": self.settings.check_telegram_proxies,
                 "sub_tag_prefix": engine.SUB_TAG_PREFIX,
                 "test_mode": engine.TEST_MODE,
                 "prefilter_enabled": self.settings.prefilter_enabled,
@@ -394,9 +380,6 @@ WRITE_DEAD_TO_REPORT=1
                 "ping_workers": engine.PING_WORKERS,
             },
             "stats": {
-                "loaded": len(items),
-                "testable_after_prefilter": len(endpoints),
-                "prefilter_rejected": len(prefiltered_dead),
                 "alive_total": len(alive),
                 "dead_total": len(dead),
                 "alive_configs": len(alive_configs),
@@ -414,9 +397,128 @@ WRITE_DEAD_TO_REPORT=1
         }
         engine.REPORT_FILE.write_text(json.dumps(full, ensure_ascii=False, indent=2), encoding="utf-8")
         self.counters.emit(len(alive_configs), len(alive_proxies), len(dead), len(unsupported))
-        self.emit_log(f"تمام شد: sub.txt={len(alive_configs)} | proxy.txt={len(alive_proxies)} | dead={len(dead)} | unsupported={len(unsupported)}")
         return full
 
+    def test_stage2(self, xray_path: Optional[Path]) -> dict[str, Any]:
+        self.stage_text.emit("تست واقعی")
+        items = engine.read_stage1_configs()
+        endpoints: list[Any] = []
+        unsupported: list[str] = []
+
+        skipped_configs: list[str] = []
+        skipped_proxies: list[str] = []
+        for item in items:
+            ep = engine.parse_endpoint(item["raw"], item.get("source", "stage1"))
+            if ep:
+                if ep.kind == "mtproto" and not self.settings.check_telegram_proxies:
+                    skipped_proxies.append(item["raw"])
+                    continue
+                if ep.kind != "mtproto" and not self.settings.check_v2ray_configs:
+                    skipped_configs.append(item["raw"])
+                    continue
+                endpoints.append(ep)
+            else:
+                unsupported.append(item["raw"])
+
+        if skipped_configs:
+            self.emit_log(f"INFO بررسی کانفیگ خاموش است؛ {len(skipped_configs)} کانفیگ رد شد.")
+        if skipped_proxies:
+            self.emit_log(f"INFO بررسی پروکسی خاموش است؛ {len(skipped_proxies)} پروکسی تلگرام رد شد.")
+        self.emit_log(f"INFO خوانده‌شده: {len(items)} | قابل تست: {len(endpoints)} | پشتیبانی‌نشده: {len(unsupported)}")
+        endpoints, prefiltered_dead = self.tcp_prefilter(endpoints)
+
+        total = max(len(endpoints), 1)
+        self.progress.emit(0, total)
+        results: list[Any] = [
+            engine.TestResult(
+                raw=ep.raw,
+                source=ep.source,
+                kind=ep.kind,
+                protocol=ep.protocol,
+                host=ep.host,
+                port=ep.port,
+                ok=False,
+                ping_ms=None,
+                min_ms=None,
+                avg_ms=None,
+                attempts=1,
+                success_count=0,
+                samples_ms=[],
+                tester="tcp-prefilter",
+                error="tcp_prefilter_failed",
+            )
+            for ep in prefiltered_dead
+        ]
+        done = 0
+        start = time.time()
+        pending = deque(endpoints)
+        running: dict[Any, Any] = {}
+        workers = max(1, engine.PING_WORKERS)
+        pause_announced = False
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            while pending or running:
+                if self._abort_requested:
+                    self.emit_log("ERR تست از ابتدا ریست شد؛ خروجی‌های موقت حفظ نشدند.")
+                    break
+
+                if self._pause_requested:
+                    if not pause_announced:
+                        pause_announced = True
+                        self.stage_text.emit("توقف موقت")
+                        self.emit_log("INFO توقف موقت فعال شد؛ تست‌های در حال اجرا تمام می‌شوند و تست جدید شروع نمی‌شود.")
+                        engine.cleanup_xray_processes()
+                        elapsed = int(time.time() - start)
+                        self.write_partial_outputs(results, unsupported, elapsed, xray_path)
+                        self.paused.emit()
+                    # keep collecting finished in-flight tasks; submit nothing new.
+                else:
+                    if pause_announced:
+                        pause_announced = False
+                        self.stage_text.emit("ادامه تست واقعی")
+                        self.emit_log("INFO ادامه تست از همان نقطه شروع شد.")
+                    while pending and len(running) < workers:
+                        ep = pending.popleft()
+                        fut = ex.submit(engine.repeated_test, ep, xray_path)
+                        running[fut] = ep
+
+                if not running:
+                    self._resume_event.wait(0.15)
+                    continue
+
+                done_set, _ = wait(list(running.keys()), timeout=0.25, return_when=FIRST_COMPLETED)
+                if not done_set:
+                    continue
+
+                for fut in done_set:
+                    ep = running.pop(fut, None)
+                    try:
+                        res = fut.result()
+                    except Exception as exc:
+                        if ep is None:
+                            continue
+                        res = engine.TestResult(ep.raw, ep.source, ep.kind, ep.protocol, ep.host, ep.port, False, None, None, None, engine.PING_ATTEMPTS, 0, [], "internal", repr(exc))
+                    results.append(res)
+                    done += 1
+                    if res.ok:
+                        self.emit_log(f"OK {res.protocol} {res.host}:{res.port} | {engine.fmt_ms(res.ping_ms)} | {res.success_count}/{res.attempts} | {res.tester}")
+                    else:
+                        self.emit_log(f"FAIL {res.protocol} {res.host}:{res.port} | {res.error or 'failed'}")
+                    alive_configs_live = len([r for r in results if r.ok and r.kind != "mtproto"])
+                    alive_proxies_live = len([r for r in results if r.ok and r.kind == "mtproto"])
+                    dead_count = len([r for r in results if not r.ok])
+                    self.progress.emit(done, total)
+                    self.counters.emit(alive_configs_live, alive_proxies_live, dead_count, len(unsupported))
+                    if done % 5 == 0 or res.ok:
+                        elapsed = int(time.time() - start)
+                        self.write_partial_outputs(results, unsupported, elapsed, xray_path)
+
+        elapsed = int(time.time() - start)
+        final = self.write_partial_outputs(results, unsupported, elapsed, xray_path)
+        stats = final.get("stats", {})
+        self.emit_log(f"OK تمام شد: sub.txt={stats.get('alive_configs', 0)} | proxy.txt={stats.get('alive_telegram_proxies', 0)} | dead={stats.get('dead_total', 0)} | unsupported={stats.get('unsupported', 0)}")
+        engine.cleanup_xray_processes()
+        return final
 
 def resource_path(*parts: str) -> Path:
     root_candidate = engine.ROOT.joinpath(*parts)
@@ -498,6 +600,7 @@ class StatCard(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignVCenter)
         icon = QLabel()
         icon.setObjectName("CardIcon")
         icon.setFixedSize(38, 38)
@@ -508,8 +611,11 @@ class StatCard(QFrame):
         text_box = QVBoxLayout()
         self.value = QLabel("0")
         self.value.setObjectName("CardValue")
+        self.value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         label = QLabel(title)
         label.setObjectName("CardLabel")
+        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        text_box.setAlignment(Qt.AlignVCenter)
         text_box.addWidget(self.value)
         text_box.addWidget(label)
         layout.addWidget(icon)
@@ -519,13 +625,19 @@ class StatCard(QFrame):
         self.value.setText(str(value))
 
 
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker: Optional[CheckerWorker] = None
         self.compact_nav = False
+        self.sidebar_collapsed = False
+        self._drag_position = None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setWindowTitle(f"{APP_TITLE} v{APP_VERSION}")
-        self.setMinimumSize(980, 680)
+        self.setMinimumSize(920, 620)
+        self.resize(1220, 760)
         icon_path = resource_path("assets", "app.ico")
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -538,34 +650,89 @@ class MainWindow(QMainWindow):
     def build_ui(self) -> None:
         root = QWidget()
         root.setObjectName("AppRoot")
+        self.root = root
         self.setCentralWidget(root)
-        outer = QHBoxLayout(root)
-        outer.setContentsMargins(14, 14, 14, 14)
-        outer.setSpacing(14)
+        root_layout = QVBoxLayout(root)
+        self.root_layout = root_layout
+        root_layout.setContentsMargins(10, 10, 10, 10)
+        root_layout.setSpacing(10)
+
+        self.topbar = QFrame()
+        self.topbar.setObjectName("TopBar")
+        top = QHBoxLayout(self.topbar)
+        top.setContentsMargins(14, 10, 12, 10)
+        top.setSpacing(10)
+
+        self.btn_nav_toggle = QToolButton()
+        self.btn_nav_toggle.setObjectName("TopIconButton")
+        self.btn_nav_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_nav_toggle.setToolTip("باز و بسته کردن منوی کناری")
+        icon_path = resource_path("assets", "list.svg")
+        if icon_path.exists():
+            self.btn_nav_toggle.setIcon(QIcon(str(icon_path)))
+        self.btn_nav_toggle.setIconSize(QSize(18, 18))
+        self.btn_nav_toggle.setFixedSize(42, 42)
+        self.btn_nav_toggle.clicked.connect(self.toggle_sidebar)
+        top.addWidget(self.btn_nav_toggle)
+
+        self.header_logo = LogoMark(42)
+        top.addWidget(self.header_logo)
+
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        self.title_label = QLabel("Dicode Config Checker")
+        self.title_label.setObjectName("Title")
+        self.title_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.subtitle_label = QLabel("اسکن کانال‌ها، تست کیفیت اتصال و ساخت خروجی‌های sub.txt / proxy.txt")
+        self.subtitle_label.setObjectName("Subtitle")
+        self.subtitle_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.subtitle_label.setLayoutDirection(Qt.RightToLeft)
+        title_box.addWidget(self.title_label)
+        title_box.addWidget(self.subtitle_label)
+        top.addLayout(title_box, 1)
+
+        self.btn_minimize = QToolButton()
+        self.btn_minimize.setObjectName("WindowButton")
+        self.btn_minimize.setText("—")
+        self.btn_minimize.clicked.connect(self.showMinimized)
+        self.btn_maximize = QToolButton()
+        self.btn_maximize.setObjectName("WindowButton")
+        self.btn_maximize.setText("□")
+        self.btn_maximize.clicked.connect(self.toggle_maximize)
+        self.btn_close = QToolButton()
+        self.btn_close.setObjectName("CloseButton")
+        self.btn_close.setText("×")
+        self.btn_close.clicked.connect(self.close)
+        for b in (self.btn_minimize, self.btn_maximize, self.btn_close):
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedSize(38, 38)
+            top.addWidget(b)
+        root_layout.addWidget(self.topbar)
+
+        body = QHBoxLayout()
+        body.setSpacing(10)
+        root_layout.addLayout(body, 1)
 
         self.sidebar = QFrame()
         self.sidebar.setObjectName("Sidebar")
-        self.sidebar.setFixedWidth(176)
+        self.sidebar.setFixedWidth(216)
         nav_layout = QVBoxLayout(self.sidebar)
-        nav_layout.setContentsMargins(12, 12, 12, 12)
+        nav_layout.setContentsMargins(10, 10, 10, 10)
         nav_layout.setSpacing(8)
 
-        brand = QFrame()
-        brand.setObjectName("BrandBox")
-        brand_layout = QHBoxLayout(brand)
-        brand_layout.setContentsMargins(10, 10, 10, 10)
-        self.brand_icon = LogoMark(44)
-        self.brand_text = QLabel("Dicode\nChecker")
-        self.brand_text.setObjectName("BrandText")
-        brand_layout.addWidget(self.brand_icon)
-        brand_layout.addWidget(self.brand_text, 1)
-        nav_layout.addWidget(brand)
+        self.sidebar_caption = QLabel("منوی ابزار")
+        self.sidebar_caption.setObjectName("SidebarCaption")
+        self.sidebar_caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        nav_layout.addWidget(self.sidebar_caption)
 
         self.nav_dashboard = NavButton("داشبورد", "dashboard", 0)
         self.nav_settings = NavButton("تنظیمات", "sliders", 1)
         self.nav_channels = NavButton("کانال‌ها", "list", 2)
+        self.nav_configs = NavButton("کانفیگ‌ها", "check", 3)
+        self.nav_proxies = NavButton("پروکسی‌ها", "bolt", 4)
         self.nav_dashboard.setChecked(True)
-        for btn in (self.nav_dashboard, self.nav_settings, self.nav_channels):
+        self.nav_buttons = [self.nav_dashboard, self.nav_settings, self.nav_channels, self.nav_configs, self.nav_proxies]
+        for btn in self.nav_buttons:
             nav_layout.addWidget(btn)
             btn.clicked.connect(lambda checked=False, b=btn: self.switch_page(b.index))
 
@@ -573,51 +740,30 @@ class MainWindow(QMainWindow):
         self.btn_open_side = IconButton("پوشه خروجی", "folder")
         self.btn_open_side.clicked.connect(self.open_output_folder)
         nav_layout.addWidget(self.btn_open_side)
-        outer.addWidget(self.sidebar)
+        body.addWidget(self.sidebar)
 
-        main = QFrame()
-        main.setObjectName("MainPanel")
-        main_layout = QVBoxLayout(main)
-        main_layout.setContentsMargins(18, 18, 18, 18)
-        main_layout.setSpacing(14)
-        outer.addWidget(main, 1)
-
-        header = QFrame()
-        header.setObjectName("TopHeader")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(18, 14, 18, 14)
-        header_layout.setSpacing(12)
-        self.header_logo = LogoMark(42)
-        header_layout.addWidget(self.header_logo)
-        title_box = QVBoxLayout()
-        title_box.setSpacing(3)
-        self.title_label = QLabel("Dicode Config Checker")
-        self.title_label.setObjectName("Title")
-        self.subtitle_label = QLabel("جمع‌آوری کانفیگ، تست واقعی با Xray و ساخت sub.txt / proxy.txt")
-        self.subtitle_label.setObjectName("Subtitle")
-        title_box.addWidget(self.title_label)
-        title_box.addWidget(self.subtitle_label)
-        header_layout.addLayout(title_box, 1)
-        self.stage_label = QLabel("آماده")
-        self.stage_label.setObjectName("StagePill")
-        self.stage_label.setAlignment(Qt.AlignCenter)
-        header_layout.addWidget(self.stage_label)
-        main_layout.addWidget(header)
-
+        self.content_panel = QFrame()
+        self.content_panel.setObjectName("ContentPanel")
+        content_layout = QVBoxLayout(self.content_panel)
+        content_layout.setContentsMargins(14, 14, 14, 14)
+        content_layout.setSpacing(12)
         self.pages = QStackedWidget()
-        main_layout.addWidget(self.pages, 1)
+        content_layout.addWidget(self.pages, 1)
+        body.addWidget(self.content_panel, 1)
+
         self.build_dashboard_page()
         self.build_settings_page()
         self.build_channels_page()
+        self.build_output_pages()
 
     def build_dashboard_page(self) -> None:
         page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(14)
+        page_layout.setSpacing(12)
 
         self.cards_grid = QGridLayout()
-        self.cards_grid.setSpacing(12)
+        self.cards_grid.setSpacing(10)
         self.card_alive_configs = StatCard("کانفیگ سالم", "check")
         self.card_alive_proxies = StatCard("پروکسی سالم", "bolt")
         self.card_dead = StatCard("ناموفق", "x")
@@ -630,23 +776,26 @@ class MainWindow(QMainWindow):
         progress_panel = QFrame()
         progress_panel.setObjectName("Panel")
         pp = QVBoxLayout(progress_panel)
-        pp.setContentsMargins(16, 14, 16, 14)
+        pp.setContentsMargins(14, 12, 14, 12)
         pp.setSpacing(10)
         top = QHBoxLayout()
-        self.progress_title = QLabel("وضعیت اجرا")
-        self.progress_title.setObjectName("SectionTitle")
         self.progress_meta = QLabel("برای شروع روی دکمه شروع بزن")
         self.progress_meta.setObjectName("Muted")
-        top.addWidget(self.progress_title)
-        top.addStretch(1)
+        self.progress_meta.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.progress_meta.setLayoutDirection(Qt.RightToLeft)
+        self.progress_title = QLabel("وضعیت اجرا")
+        self.progress_title.setObjectName("SectionTitle")
+        self.progress_title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         top.addWidget(self.progress_meta)
+        top.addStretch(1)
+        top.addWidget(self.progress_title)
         pp.addLayout(top)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_anim = QPropertyAnimation(self.progress_bar, b"value", self)
-        self.progress_anim.setDuration(260)
+        self.progress_anim.setDuration(120)
         self.progress_anim.setEasingCurve(QEasingCurve.OutCubic)
         pp.addWidget(self.progress_bar)
         page_layout.addWidget(progress_panel)
@@ -654,16 +803,17 @@ class MainWindow(QMainWindow):
         log_panel = QFrame()
         log_panel.setObjectName("Panel")
         lp = QVBoxLayout(log_panel)
-        lp.setContentsMargins(16, 14, 16, 14)
+        lp.setContentsMargins(14, 12, 14, 12)
         lp.setSpacing(10)
         log_header = QHBoxLayout()
-        log_title = QLabel("لاگ زنده")
-        log_title.setObjectName("SectionTitle")
         self.btn_clear_log = IconButton("پاک کردن", "trash")
         self.btn_clear_log.clicked.connect(lambda: self.log_box.clear())
-        log_header.addWidget(log_title)
-        log_header.addStretch(1)
+        log_title = QLabel("لاگ زنده")
+        log_title.setObjectName("SectionTitle")
+        log_title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         log_header.addWidget(self.btn_clear_log)
+        log_header.addStretch(1)
+        log_header.addWidget(log_title)
         lp.addLayout(log_header)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
@@ -672,21 +822,24 @@ class MainWindow(QMainWindow):
         page_layout.addWidget(log_panel, 1)
 
         actions = QHBoxLayout()
-        actions.setSpacing(10)
+        actions.setSpacing(8)
         self.btn_start = IconButton("شروع بررسی", "play", primary=True)
-        self.btn_continue = IconButton("ادامه بعد از قطع اتصال", "next")
+        self.btn_continue = IconButton("ادامه", "next")
         self.btn_continue.setEnabled(False)
-        self.btn_stop = IconButton("توقف", "stop")
+        self.btn_stop = IconButton("توقف موقت", "stop")
+        self.btn_reset_run = IconButton("شروع از ابتدا", "reset")
         self.btn_open = IconButton("پوشه خروجی", "folder")
-        actions.addWidget(self.btn_start, 2)
-        actions.addWidget(self.btn_continue, 2)
-        actions.addWidget(self.btn_stop, 1)
         actions.addWidget(self.btn_open, 1)
+        actions.addWidget(self.btn_reset_run, 1)
+        actions.addWidget(self.btn_stop, 1)
+        actions.addWidget(self.btn_continue, 1)
+        actions.addWidget(self.btn_start, 2)
         page_layout.addLayout(actions)
 
         self.btn_start.clicked.connect(self.start_run)
         self.btn_continue.clicked.connect(self.continue_run)
         self.btn_stop.clicked.connect(self.stop_run)
+        self.btn_reset_run.clicked.connect(self.reset_run)
         self.btn_open.clicked.connect(self.open_output_folder)
         self.pages.addWidget(page)
 
@@ -695,62 +848,116 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setObjectName("TransparentScroll")
         page = QWidget()
-        scroll.setWidget(page)
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 4, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
+        scroll.setWidget(page)
 
-        header = self.page_header("تنظیمات قبل از شروع", "عددها را قبل از اجرای تست تغییر بده؛ همه تنظیمات در .env ذخیره می‌شوند.", "sliders")
+        header = self.page_header("تنظیمات قبل از شروع", "تنظیمات تست، اولویت کانال‌ها، کیفیت بررسی و خروجی‌ها", "sliders")
         layout.addWidget(header)
 
-        box = QFrame()
-        box.setObjectName("Panel")
-        grid = QGridLayout(box)
-        grid.setContentsMargins(18, 18, 18, 18)
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(14)
-        layout.addWidget(box)
-
-        self.per_channel = self.spin(1, 200, 20)
-        self.main_limit = self.spin(1, 300, 30)
+        self.per_channel = self.spin(1, 300, 20)
+        self.main_limit = self.spin(1, 1000, 30)
         self.fetch_workers = self.spin(1, 64, 10)
         self.ping_workers = self.spin(1, 32, 4)
-        self.attempts = self.spin(1, 6, 2)
-        self.min_success = self.spin(1, 6, 1)
+        self.attempts = self.spin(1, 8, 2)
+        self.min_success = self.spin(1, 8, 1)
         self.prefilter_workers = self.spin(1, 128, 64)
-        self.main_channel = QLineEdit("persianvpnhub")
         self.test_mode = QComboBox()
         self.test_mode.addItems(["auto", "xray", "tcp"])
         self.check_url = QLineEdit("http://www.gstatic.com/generate_204")
         self.tag_prefix = QLineEdit("t.me/dicodeir")
         self.rename_names = QCheckBox("بازنویسی نام کانفیگ بعد از #")
         self.rename_names.setChecked(True)
+        self.rename_names.setLayoutDirection(Qt.RightToLeft)
         self.rename_names.setToolTip("اگر خاموش باشد، نام اصلی کانفیگ‌ها حفظ می‌شود. اگر روشن باشد، متن زیر با شماره‌گذاری اعمال می‌شود.")
+        self.check_configs = QCheckBox("بررسی کانفیگ‌های V2Ray/Xray و ساخت sub.txt")
+        self.check_configs.setChecked(True)
+        self.check_configs.setLayoutDirection(Qt.RightToLeft)
+        self.check_configs.setToolTip("اگر فقط پروکسی تلگرام می‌خواهی، این گزینه را خاموش کن تا کانفیگ‌ها تست و خروجی sub.txt ساخته نشوند.")
+        self.check_proxies = QCheckBox("بررسی پروکسی‌های تلگرام و ساخت proxy.txt")
+        self.check_proxies.setChecked(True)
+        self.check_proxies.setLayoutDirection(Qt.RightToLeft)
+        self.check_proxies.setToolTip("اگر فقط کانفیگ V2Ray/Xray می‌خواهی، این گزینه را خاموش کن تا پروکسی‌های تلگرام تست نشوند.")
         self.prefilter = QCheckBox("پیش‌فیلتر سریع TCP قبل از Xray")
         self.prefilter.setChecked(True)
+        self.prefilter.setLayoutDirection(Qt.RightToLeft)
 
-        row = 0
-        self.add_field(grid, row, 0, "تعداد هر کانال", self.per_channel)
-        self.add_field(grid, row, 1, "تعداد کانال اصلی", self.main_limit)
-        self.add_field(grid, row, 2, "نام کانال اصلی", self.main_channel)
-        row += 1
-        self.add_field(grid, row, 0, "Fetch workers", self.fetch_workers)
-        self.add_field(grid, row, 1, "Ping workers", self.ping_workers)
-        self.add_field(grid, row, 2, "Prefilter workers", self.prefilter_workers)
-        row += 1
-        self.add_field(grid, row, 0, "تعداد تلاش", self.attempts)
-        self.add_field(grid, row, 1, "حداقل موفقیت", self.min_success)
-        self.add_field(grid, row, 2, "حالت تست", self.test_mode)
-        row += 1
-        self.add_field(grid, row, 0, "متن نام کانفیگ", self.tag_prefix)
-        self.add_field(grid, row, 1, "URL تست", self.check_url, colspan=2)
-        row += 1
-        grid.addWidget(self.rename_names, row, 0, 1, 3)
-        row += 1
-        grid.addWidget(self.prefilter, row, 0, 1, 3)
+        def section(title: str, subtitle: str) -> QFrame:
+            wrap = QFrame()
+            wrap.setObjectName("SettingsSection")
+            vl = QVBoxLayout(wrap)
+            vl.setContentsMargins(14, 12, 14, 14)
+            vl.setSpacing(10)
+            head = QLabel(title)
+            head.setObjectName("SectionTitle")
+            head.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            desc = QLabel(subtitle)
+            desc.setObjectName("Muted")
+            desc.setWordWrap(True)
+            desc.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            desc.setLayoutDirection(Qt.RightToLeft)
+            vl.addWidget(head)
+            vl.addWidget(desc)
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(10)
+            grid.setVerticalSpacing(10)
+            vl.addLayout(grid)
+            wrap._grid = grid  # type: ignore[attr-defined]
+            return wrap
 
-        hint = QLabel("پیشنهاد Release: حالت auto، پیش‌فیلتر روشن، Ping workers روی 4، تعداد تلاش 2. اگر کیفیت مهم‌تر از زمان است، تلاش را 3 یا 4 کن.")
+        rank_box = section("اولویت کانال‌ها", "کانال‌های رتبه اول با سقف جداگانه بررسی می‌شوند؛ کانال‌های رتبه دوم با سقف عمومی.")
+        rank_grid = rank_box._grid  # type: ignore[attr-defined]
+        self.add_field(rank_grid, 0, 0, "تعداد کانفیگ از هر کانال رتبه دوم", self.per_channel)
+        self.add_field(rank_grid, 0, 1, "تعداد کانفیگ از هر کانال رتبه اول", self.main_limit)
+        layout.addWidget(rank_box)
+
+        speed_box = section("سرعت و کیفیت تست", "برای کیفیت بهتر، تعداد تلاش و حداقل موفقیت را بیشتر کن؛ برای سرعت بیشتر Ping workers را افزایش بده.")
+        speed_grid = speed_box._grid  # type: ignore[attr-defined]
+        self.add_field(speed_grid, 0, 0, "Fetch workers", self.fetch_workers)
+        self.add_field(speed_grid, 0, 1, "Ping workers", self.ping_workers)
+        self.add_field(speed_grid, 1, 0, "Prefilter workers", self.prefilter_workers)
+        self.add_field(speed_grid, 1, 1, "حالت تست", self.test_mode)
+        self.add_field(speed_grid, 2, 0, "تعداد تلاش", self.attempts)
+        self.add_field(speed_grid, 2, 1, "حداقل موفقیت", self.min_success)
+        layout.addWidget(speed_box)
+
+        output_box = section("خروجی و نام‌گذاری", "نام کانفیگ‌ها را می‌توان حفظ کرد یا با متن دلخواه و شماره‌گذاری جایگزین کرد.")
+        output_grid = output_box._grid  # type: ignore[attr-defined]
+        self.add_field(output_grid, 0, 0, "متن نام کانفیگ", self.tag_prefix)
+        self.add_field(output_grid, 0, 1, "URL تست", self.check_url)
+        opt = QFrame()
+        opt.setObjectName("OptionsBox")
+        opt_l = QVBoxLayout(opt)
+        opt_l.setContentsMargins(12, 10, 12, 10)
+        opt_l.setSpacing(10)
+        opt_l.addWidget(self.rename_names)
+        opt_l.addWidget(self.check_configs)
+        opt_l.addWidget(self.check_proxies)
+        opt_l.addWidget(self.prefilter)
+        output_grid.addWidget(opt, 1, 0, 1, 2)
+        layout.addWidget(output_box)
+
+        reset_wrap = QFrame()
+        reset_wrap.setObjectName("ResetBox")
+        reset_l = QHBoxLayout(reset_wrap)
+        reset_l.setContentsMargins(12, 10, 12, 10)
+        reset_l.setSpacing(10)
+        self.btn_reset_settings = IconButton("ریست تنظیمات", "reset")
+        self.btn_reset_settings.clicked.connect(self.reset_settings)
+        reset_hint = QLabel("بازگردانی تنظیمات تست به مقادیر پیشنهادی نسخه 1.0.1")
+        reset_hint.setObjectName("Muted")
+        reset_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        reset_hint.setLayoutDirection(Qt.RightToLeft)
+        reset_l.addWidget(self.btn_reset_settings)
+        reset_l.addStretch(1)
+        reset_l.addWidget(reset_hint)
+        layout.addWidget(reset_wrap)
+
+        hint = QLabel("پیشنهاد تست: حالت auto، پیش‌فیلتر روشن، Ping workers روی 4، تعداد تلاش 2. اگر کیفیت مهم‌تر از زمان است، تلاش را 3 یا 4 کن.")
         hint.setObjectName("Hint")
+        hint.setLayoutDirection(Qt.RightToLeft)
+        hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         hint.setWordWrap(True)
         layout.addWidget(hint)
         layout.addStretch(1)
@@ -764,7 +971,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
-        header = self.page_header("لیست کانال‌ها", "هر خط یک کانال؛ لینک t.me یا یوزرنیم ساده را می‌پذیرد.", "list")
+        header = self.page_header("اولویت کانال‌ها", "کانال‌های رتبه اول با سقف رتبه اول و کانال‌های رتبه دوم با سقف عمومی بررسی می‌شوند.", "list")
         layout.addWidget(header)
 
         toolbar = QFrame()
@@ -772,29 +979,56 @@ class MainWindow(QMainWindow):
         tb = QHBoxLayout(toolbar)
         tb.setContentsMargins(14, 12, 14, 12)
         tb.setSpacing(10)
+        self.btn_load_file = IconButton("واردکردن فایل", "import")
+        self.btn_default = IconButton("پیش‌فرض", "reset")
+        self.btn_dedupe = IconButton("پاکسازی تکراری", "clean")
+        self.btn_save_channels = IconButton("ذخیره", "save", primary=True)
         self.channel_count = QLabel("0 کانال")
         self.channel_count.setObjectName("StagePill")
-        self.btn_save_channels = IconButton("ذخیره", "save", primary=True)
-        self.btn_dedupe = IconButton("پاکسازی تکراری", "clean")
-        self.btn_default = IconButton("پیش‌فرض", "reset")
-        self.btn_load_file = IconButton("واردکردن فایل", "import")
-        tb.addWidget(self.channel_count)
-        tb.addStretch(1)
-        tb.addWidget(self.btn_save_channels)
-        tb.addWidget(self.btn_dedupe)
-        tb.addWidget(self.btn_default)
+        self.channel_count.setAlignment(Qt.AlignCenter)
         tb.addWidget(self.btn_load_file)
+        tb.addWidget(self.btn_default)
+        tb.addWidget(self.btn_dedupe)
+        tb.addWidget(self.btn_save_channels)
+        tb.addStretch(1)
+        tb.addWidget(self.channel_count)
         layout.addWidget(toolbar)
 
-        editor_panel = QFrame()
-        editor_panel.setObjectName("Panel")
-        ep = QVBoxLayout(editor_panel)
-        ep.setContentsMargins(14, 14, 14, 14)
-        self.channels_editor = QPlainTextEdit()
-        self.channels_editor.setPlaceholderText("هر خط یک کانال. مثال:\nt.me/v2rayngvpn\nConfigX2ray")
-        self.channels_editor.textChanged.connect(self.update_channel_count)
-        ep.addWidget(self.channels_editor, 1)
-        layout.addWidget(editor_panel, 1)
+        editors = QFrame()
+        editors.setObjectName("Panel")
+        eg = QGridLayout(editors)
+        eg.setContentsMargins(14, 14, 14, 14)
+        eg.setSpacing(12)
+
+        p1_box = QFrame(); p1_box.setObjectName("FieldBox"); p1_box.setProperty("accent", "1")
+        p1_l = QVBoxLayout(p1_box); p1_l.setContentsMargins(12, 10, 12, 12); p1_l.setSpacing(8)
+        p1_title = QLabel("کانال‌های رتبه اول")
+        p1_title.setObjectName("SectionTitle"); p1_title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        p1_hint = QLabel("برای کانال‌های مهم‌تر؛ تعدادشان از تنظیمات با سقف رتبه اول کنترل می‌شود.")
+        p1_hint.setObjectName("Muted"); p1_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter); p1_hint.setLayoutDirection(Qt.RightToLeft)
+        self.priority1_editor = QPlainTextEdit()
+        self.priority1_editor.setObjectName("ChannelEditor")
+        self.priority1_editor.setLayoutDirection(Qt.LeftToRight)
+        self.priority1_editor.setPlaceholderText("مثال:\nt.me/persianvpnhub")
+        self.priority1_editor.textChanged.connect(self.update_channel_count)
+        p1_l.addWidget(p1_title); p1_l.addWidget(p1_hint); p1_l.addWidget(self.priority1_editor, 1)
+
+        p2_box = QFrame(); p2_box.setObjectName("FieldBox"); p2_box.setProperty("accent", "0")
+        p2_l = QVBoxLayout(p2_box); p2_l.setContentsMargins(12, 10, 12, 12); p2_l.setSpacing(8)
+        p2_title = QLabel("کانال‌های رتبه دوم")
+        p2_title.setObjectName("SectionTitle"); p2_title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        p2_hint = QLabel("لیست عمومی کانال‌ها؛ هر خط یک لینک t.me یا یوزرنیم ساده.")
+        p2_hint.setObjectName("Muted"); p2_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter); p2_hint.setLayoutDirection(Qt.RightToLeft)
+        self.priority2_editor = QPlainTextEdit()
+        self.priority2_editor.setObjectName("ChannelEditor")
+        self.priority2_editor.setLayoutDirection(Qt.LeftToRight)
+        self.priority2_editor.setPlaceholderText("هر خط یک کانال. مثال:\nt.me/v2rayngvpn\nConfigX2ray")
+        self.priority2_editor.textChanged.connect(self.update_channel_count)
+        p2_l.addWidget(p2_title); p2_l.addWidget(p2_hint); p2_l.addWidget(self.priority2_editor, 1)
+
+        eg.addWidget(p1_box, 0, 0)
+        eg.addWidget(p2_box, 0, 1)
+        layout.addWidget(editors, 1)
 
         self.btn_save_channels.clicked.connect(self.save_channels_from_editor)
         self.btn_dedupe.clicked.connect(self.dedupe_channels)
@@ -802,28 +1036,101 @@ class MainWindow(QMainWindow):
         self.btn_load_file.clicked.connect(self.import_channels_file)
         self.pages.addWidget(page)
 
+    def build_output_pages(self) -> None:
+        self.configs_page_index = self.pages.count()
+        config_page = self.build_single_output_page(
+            title="کانفیگ‌ها",
+            subtitle="خروجی sub.txt اینجا نمایش داده می‌شود؛ برای استفاده سریع می‌توانی کپی کنی یا فایل را باز کنی.",
+            icon_name="check",
+            kind="configs",
+        )
+        self.pages.addWidget(config_page)
+
+        self.proxies_page_index = self.pages.count()
+        proxy_page = self.build_single_output_page(
+            title="پروکسی‌ها",
+            subtitle="خروجی proxy.txt جدا از کانفیگ‌ها نگهداری می‌شود و فقط وقتی گزینه بررسی پروکسی روشن باشد پر می‌شود.",
+            icon_name="bolt",
+            kind="proxies",
+        )
+        self.pages.addWidget(proxy_page)
+
+    def build_single_output_page(self, title: str, subtitle: str, icon_name: str, kind: str) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        layout.addWidget(self.page_header(title, subtitle, icon_name))
+
+        toolbar = QFrame()
+        toolbar.setObjectName("Panel")
+        tb = QHBoxLayout(toolbar)
+        tb.setContentsMargins(14, 12, 14, 12)
+        tb.setSpacing(10)
+        copy_btn = IconButton("کپی خروجی", "copy", primary=True)
+        reload_btn = IconButton("بارگذاری دوباره", "reset")
+        open_btn = IconButton("پوشه خروجی", "folder")
+        counter = QLabel("0 خط")
+        counter.setObjectName("SoftPill")
+        counter.setAlignment(Qt.AlignCenter)
+        tb.addWidget(open_btn)
+        tb.addWidget(reload_btn)
+        tb.addWidget(copy_btn)
+        tb.addStretch(1)
+        tb.addWidget(counter)
+        layout.addWidget(toolbar)
+
+        panel = QFrame()
+        panel.setObjectName("Panel")
+        pl = QVBoxLayout(panel)
+        pl.setContentsMargins(14, 14, 14, 14)
+        box = QTextEdit()
+        box.setObjectName("ResultBox")
+        box.setReadOnly(True)
+        box.setLayoutDirection(Qt.LeftToRight)
+        box.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        box.setPlaceholderText("هنوز خروجی ساخته نشده است.")
+        pl.addWidget(box, 1)
+        layout.addWidget(panel, 1)
+
+        if kind == "configs":
+            self.config_results = box
+            self.config_count_label = counter
+            copy_btn.clicked.connect(lambda: self.copy_result_box("configs"))
+        else:
+            self.proxy_results = box
+            self.proxy_count_label = counter
+            copy_btn.clicked.connect(lambda: self.copy_result_box("proxies"))
+        reload_btn.clicked.connect(self.refresh_result_tabs)
+        open_btn.clicked.connect(self.open_output_folder)
+        return page
+
     def page_header(self, title: str, subtitle: str, icon_name: str) -> QFrame:
         frame = QFrame()
         frame.setObjectName("PageHeader")
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(16, 14, 16, 14)
-        icon = QLabel()
-        icon.setObjectName("LargeIcon")
-        icon.setFixedSize(44, 44)
-        icon.setAlignment(Qt.AlignCenter)
-        icon_path = resource_path("assets", f"{icon_name}.svg")
-        if icon_path.exists():
-            icon.setPixmap(QPixmap(str(icon_path)).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignVCenter)
         texts = QVBoxLayout()
         t = QLabel(title)
         t.setObjectName("PageTitle")
+        t.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         s = QLabel(subtitle)
         s.setObjectName("Subtitle")
+        s.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         s.setWordWrap(True)
         texts.addWidget(t)
         texts.addWidget(s)
-        layout.addWidget(icon)
         layout.addLayout(texts, 1)
+        icon = QLabel()
+        icon.setObjectName("LargeIcon")
+        icon.setFixedSize(42, 42)
+        icon.setAlignment(Qt.AlignCenter)
+        icon_path = resource_path("assets", f"{icon_name}.svg")
+        if icon_path.exists():
+            icon.setPixmap(QPixmap(str(icon_path)).scaled(21, 21, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        layout.addWidget(icon)
         return frame
 
     @staticmethod
@@ -831,7 +1138,7 @@ class MainWindow(QMainWindow):
         s = QSpinBox()
         s.setRange(minimum, maximum)
         s.setValue(value)
-        s.setMinimumHeight(42)
+        s.setMinimumHeight(40)
         s.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         s.setAlignment(Qt.AlignCenter)
         s.setCursor(Qt.PointingHandCursor)
@@ -841,11 +1148,25 @@ class MainWindow(QMainWindow):
     def add_field(grid: QGridLayout, row: int, col: int, label_text: str, widget: QWidget, colspan: int = 1) -> None:
         wrapper = QFrame()
         wrapper.setObjectName("FieldBox")
+        wrapper.setProperty("accent", str((row + col) % 5))
         lay = QVBoxLayout(wrapper)
         lay.setContentsMargins(10, 8, 10, 10)
         lay.setSpacing(6)
         label = QLabel(label_text)
         label.setObjectName("FieldLabel")
+        has_fa = any("\u0600" <= ch <= "\u06ff" for ch in label_text)
+        label.setLayoutDirection(Qt.RightToLeft if has_fa else Qt.LeftToRight)
+        label.setAlignment((Qt.AlignRight if has_fa else Qt.AlignLeft) | Qt.AlignVCenter)
+        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        if isinstance(widget, QLineEdit):
+            txt = widget.text()
+            fa_value = any("\u0600" <= ch <= "\u06ff" for ch in txt)
+            widget.setLayoutDirection(Qt.RightToLeft if fa_value else Qt.LeftToRight)
+            widget.setAlignment((Qt.AlignRight if fa_value else Qt.AlignLeft) | Qt.AlignVCenter)
+        elif isinstance(widget, QComboBox):
+            widget.setLayoutDirection(Qt.LeftToRight)
+        else:
+            widget.setLayoutDirection(Qt.RightToLeft)
         lay.addWidget(label)
         lay.addWidget(widget)
         grid.addWidget(wrapper, row, col, 1, colspan)
@@ -857,14 +1178,14 @@ class MainWindow(QMainWindow):
             effect = QGraphicsOpacityEffect(page)
             page.setGraphicsEffect(effect)
             anim = QPropertyAnimation(effect, b"opacity", self)
-            anim.setDuration(180)
-            anim.setStartValue(0.82)
+            anim.setDuration(100)
+            anim.setStartValue(0.9)
             anim.setEndValue(1.0)
             anim.setEasingCurve(QEasingCurve.OutCubic)
             anim.finished.connect(lambda p=page: p.setGraphicsEffect(None))
             self._page_anim = anim
             anim.start()
-        for btn in (self.nav_dashboard, self.nav_settings, self.nav_channels):
+        for btn in getattr(self, "nav_buttons", (self.nav_dashboard, self.nav_settings, self.nav_channels)):
             btn.setChecked(btn.index == index)
 
     def fix_min_success(self) -> None:
@@ -872,64 +1193,136 @@ class MainWindow(QMainWindow):
             self.min_success.setValue(self.attempts.value())
         self.min_success.setMaximum(self.attempts.value())
 
+    def split_priority_from_channels(self, text: str) -> tuple[str, str]:
+        lines = CheckerWorker.normalize_channel_text(text)
+        p1_set = {x.lower().replace("t.me/", "") for x in getattr(engine, "MAIN_CHANNELS", set())}
+        p1: list[str] = []
+        p2: list[str] = []
+        seen: set[str] = set()
+        for line in lines:
+            ch = engine.normalize_channel(line)
+            if not ch:
+                continue
+            key = ch.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if key in p1_set:
+                p1.append(f"t.me/{ch}")
+            else:
+                p2.append(f"t.me/{ch}")
+        return "\n".join(p1), "\n".join(p2)
+
     def load_initial_values(self) -> None:
         engine.ensure_files()
         if engine.CHANNELS_FILE.exists():
-            self.channels_editor.setPlainText(engine.CHANNELS_FILE.read_text(encoding="utf-8", errors="ignore"))
+            raw_channels = engine.CHANNELS_FILE.read_text(encoding="utf-8", errors="ignore")
         else:
-            self.load_default_channels()
+            raw_channels = engine.DEFAULT_CHANNELS.strip()
+        p1, p2 = self.split_priority_from_channels(raw_channels)
+        self.priority1_editor.setPlainText(p1)
+        self.priority2_editor.setPlainText(p2)
         self.per_channel.setValue(getattr(engine, "PER_CHANNEL_LIMIT", 20))
         self.main_limit.setValue(getattr(engine, "MAIN_CHANNEL_LIMIT", 30))
         self.fetch_workers.setValue(getattr(engine, "FETCH_WORKERS", 8))
         self.ping_workers.setValue(getattr(engine, "PING_WORKERS", 4))
-        self.attempts.setValue(min(max(getattr(engine, "PING_ATTEMPTS", 2), 1), 6))
+        self.attempts.setValue(min(max(getattr(engine, "PING_ATTEMPTS", 2), 1), 8))
         self.min_success.setValue(min(max(getattr(engine, "MIN_SUCCESS", 1), 1), self.attempts.value()))
-        self.main_channel.setText(getattr(engine, "MAIN_CHANNEL", "persianvpnhub"))
         idx = self.test_mode.findText(getattr(engine, "TEST_MODE", "auto"))
         self.test_mode.setCurrentIndex(idx if idx >= 0 else 0)
         self.check_url.setText(getattr(engine, "CHECK_URL", "http://www.gstatic.com/generate_204"))
         self.tag_prefix.setText(getattr(engine, "SUB_TAG_PREFIX", "t.me/dicodeir"))
         self.rename_names.setChecked(bool(getattr(engine, "RENAME_CONFIG_NAMES", True)))
+        self.check_configs.setChecked(bool(getattr(engine, "CHECK_V2RAY_CONFIGS", True)))
+        self.check_proxies.setChecked(bool(getattr(engine, "CHECK_TELEGRAM_PROXIES", True)))
         self.fix_min_success()
+        self.update_channel_count()
 
     def load_default_channels(self) -> None:
-        self.channels_editor.setPlainText(engine.DEFAULT_CHANNELS.strip())
+        p1, p2 = self.split_priority_from_channels(engine.DEFAULT_CHANNELS.strip())
+        self.priority1_editor.setPlainText(p1)
+        self.priority2_editor.setPlainText(p2)
         self.update_channel_count()
+
+    def priority_channel_lists(self) -> tuple[list[str], list[str]]:
+        p1 = CheckerWorker.normalize_channel_text(self.priority1_editor.toPlainText())
+        p2 = CheckerWorker.normalize_channel_text(self.priority2_editor.toPlainText())
+        seen: set[str] = set()
+        clean_p1: list[str] = []
+        clean_p2: list[str] = []
+        for group, target in ((p1, clean_p1), (p2, clean_p2)):
+            for line in group:
+                ch = engine.normalize_channel(line)
+                if not ch:
+                    continue
+                key = ch.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                target.append(f"t.me/{ch}")
+        return clean_p1, clean_p2
 
     def save_channels_from_editor(self) -> None:
-        lines = CheckerWorker.normalize_channel_text(self.channels_editor.toPlainText())
-        engine.CHANNELS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.channels_editor.setPlainText("\n".join(lines))
+        p1, p2 = self.priority_channel_lists()
+        combined = p1 + p2
+        engine.CHANNELS_FILE.write_text("\n".join(combined) + "\n", encoding="utf-8")
+        self.priority1_editor.setPlainText("\n".join(p1))
+        self.priority2_editor.setPlainText("\n".join(p2))
         self.update_channel_count()
-        self.append_log(f"لیست کانال‌ها ذخیره شد: {len(lines)} مورد")
+        self.append_log(f"OK لیست کانال‌ها ذخیره شد: رتبه اول {len(p1)} | رتبه دوم {len(p2)}")
 
     def dedupe_channels(self) -> None:
-        lines = CheckerWorker.normalize_channel_text(self.channels_editor.toPlainText())
-        self.channels_editor.setPlainText("\n".join(lines))
+        p1, p2 = self.priority_channel_lists()
+        self.priority1_editor.setPlainText("\n".join(p1))
+        self.priority2_editor.setPlainText("\n".join(p2))
         self.update_channel_count()
-        self.append_log(f"لیست پاکسازی شد: {len(lines)} کانال یکتا")
+        self.append_log(f"OK لیست پاکسازی شد: رتبه اول {len(p1)} | رتبه دوم {len(p2)}")
 
     def import_channels_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "انتخاب فایل کانال‌ها", str(engine.ROOT), "Text files (*.txt);;All files (*.*)")
         if not path:
             return
         text = Path(path).read_text(encoding="utf-8", errors="ignore")
-        current = self.channels_editor.toPlainText().strip()
+        current = self.priority2_editor.toPlainText().strip()
         merged = (current + "\n" + text).strip() if current else text
-        self.channels_editor.setPlainText(merged)
+        self.priority2_editor.setPlainText(merged)
         self.dedupe_channels()
 
     def update_channel_count(self) -> None:
         if not hasattr(self, "channel_count"):
             return
-        lines = CheckerWorker.normalize_channel_text(self.channels_editor.toPlainText())
-        self.channel_count.setText(f"{len(lines)} کانال")
+        p1 = CheckerWorker.normalize_channel_text(self.priority1_editor.toPlainText()) if hasattr(self, "priority1_editor") else []
+        p2 = CheckerWorker.normalize_channel_text(self.priority2_editor.toPlainText()) if hasattr(self, "priority2_editor") else []
+        self.channel_count.setText(f"رتبه اول {len(p1)} | رتبه دوم {len(p2)}")
+
+    def reset_settings(self) -> None:
+        self.per_channel.setValue(20)
+        self.main_limit.setValue(30)
+        self.fetch_workers.setValue(10)
+        self.ping_workers.setValue(4)
+        self.prefilter_workers.setValue(64)
+        self.attempts.setValue(2)
+        self.min_success.setValue(1)
+        idx = self.test_mode.findText("auto")
+        self.test_mode.setCurrentIndex(idx if idx >= 0 else 0)
+        self.check_url.setText("http://www.gstatic.com/generate_204")
+        self.tag_prefix.setText("t.me/dicodeir")
+        self.rename_names.setChecked(True)
+        self.rename_names.setLayoutDirection(Qt.RightToLeft)
+        self.check_configs.setChecked(True)
+        self.check_configs.setLayoutDirection(Qt.RightToLeft)
+        self.check_proxies.setChecked(True)
+        self.check_proxies.setLayoutDirection(Qt.RightToLeft)
+        self.prefilter.setChecked(True)
+        self.prefilter.setLayoutDirection(Qt.RightToLeft)
+        self.append_log("INFO تنظیمات به حالت پیشنهادی برگشت.")
 
     def current_settings(self) -> RunSettings:
         return RunSettings(
             per_channel_limit=self.per_channel.value(),
             main_channel_limit=self.main_limit.value(),
-            main_channel=self.main_channel.text().strip() or "persianvpnhub",
+            priority1_channels_text=self.priority1_editor.toPlainText(),
+            priority2_channels_text=self.priority2_editor.toPlainText(),
             fetch_workers=self.fetch_workers.value(),
             fetch_timeout=15.0,
             test_mode=self.test_mode.currentText(),
@@ -943,16 +1336,21 @@ class MainWindow(QMainWindow):
             check_url=self.check_url.text().strip() or "http://www.gstatic.com/generate_204",
             sub_tag_prefix=self.tag_prefix.text().strip() or "t.me/dicodeir",
             rename_config_names=self.rename_names.isChecked(),
+            check_v2ray_configs=self.check_configs.isChecked(),
+            check_telegram_proxies=self.check_proxies.isChecked(),
             prefilter_enabled=self.prefilter.isChecked(),
             prefilter_workers=self.prefilter_workers.value(),
-            channels_text=self.channels_editor.toPlainText(),
         )
 
     def start_run(self) -> None:
         if self.worker and self.worker.isRunning():
             return
+        if not self.check_configs.isChecked() and not self.check_proxies.isChecked():
+            QMessageBox.warning(self, "خروجی انتخاب نشده", "حداقل یکی از خروجی‌ها را روشن کن: sub.txt یا proxy.txt")
+            return
         self.save_channels_from_editor()
         self.log_box.clear()
+        self.clear_result_tabs()
         self.switch_page(0)
         self.set_running(True)
         self.btn_continue.setEnabled(False)
@@ -966,6 +1364,7 @@ class MainWindow(QMainWindow):
         self.worker.progress.connect(self.update_progress)
         self.worker.counters.connect(self.update_counters)
         self.worker.ask_disconnect.connect(self.on_ask_disconnect)
+        self.worker.paused.connect(self.on_paused)
         self.worker.finished_ok.connect(self.on_finished)
         self.worker.failed.connect(self.on_failed)
         self.worker.start()
@@ -973,18 +1372,44 @@ class MainWindow(QMainWindow):
     def continue_run(self) -> None:
         if self.worker:
             self.btn_continue.setEnabled(False)
-            self.append_log("ادامه تست شروع شد.")
-            self.worker.continue_after_disconnect()
+            if getattr(self.worker, "_pause_requested", False):
+                self.append_log("INFO ادامه تست از توقف موقت.")
+                self.set_stage("ادامه تست")
+                self.worker.resume_after_pause()
+            else:
+                self.append_log("INFO مرحله دوم تست شروع شد.")
+                self.worker.continue_after_disconnect()
 
     def stop_run(self) -> None:
         if self.worker and self.worker.isRunning():
             self.worker.request_stop()
-            self.append_log("درخواست توقف ثبت شد.")
-            self.set_running(False)
+            self.btn_continue.setEnabled(True)
+            self.progress_meta.setText("توقف موقت")
+            self.append_log("INFO توقف موقت ثبت شد؛ برای ادامه روی دکمه ادامه بزن.")
+            self.refresh_result_tabs()
+
+    def reset_run(self) -> None:
+        if self.worker and self.worker.isRunning():
+            self.worker.request_abort()
+            try:
+                engine.cleanup_xray_processes()
+            except Exception:
+                pass
+            self.worker.wait(1500)
+        self.set_running(False)
+        self.btn_continue.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("0%")
+        self.progress_meta.setText("ریست شد")
+        self.update_counters(0, 0, 0, 0)
+        self.clear_result_tabs()
+        self.append_log("INFO اجرا ریست شد؛ برای شروع دوباره روی شروع بررسی بزن.")
 
     def set_running(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+        if hasattr(self, "btn_reset_run"):
+            self.btn_reset_run.setEnabled(True)
         self.nav_settings.setEnabled(not running)
         self.nav_channels.setEnabled(not running)
 
@@ -997,17 +1422,29 @@ class MainWindow(QMainWindow):
             "کانفیگ/فیلترشکن فعلی را کامل قطع کن. بعد داخل برنامه روی ادامه بزن تا تست واقعی از اینترنت خودت انجام شود.",
         )
 
+    def on_paused(self) -> None:
+        self.btn_continue.setEnabled(True)
+        self.progress_meta.setText("توقف موقت")
+        self.refresh_result_tabs()
+        self.append_log("INFO خروجی‌های موقت ذخیره شدند؛ می‌توانی کپی کنی یا ادامه بدهی.")
+
     def on_finished(self, report: dict) -> None:
         self.set_running(False)
         self.btn_continue.setEnabled(False)
         self.set_stage("تمام شد")
         self.progress_bar.setValue(self.progress_bar.maximum())
         self.progress_meta.setText("خروجی ساخته شد")
+        self.refresh_result_tabs()
+        self.switch_page(getattr(self, "configs_page_index", 0))
+        try:
+            engine.cleanup_xray_processes()
+        except Exception:
+            pass
         stats = report.get("stats", {})
         QMessageBox.information(
             self,
             "خروجی ساخته شد",
-            f"sub.txt: {stats.get('alive_configs', 0)} کانفیگ\nproxy.txt: {stats.get('alive_telegram_proxies', 0)} پروکسی\nناموفق: {stats.get('dead_total', 0)}",
+            f"sub.txt: {stats.get('alive_configs', 0)} کانفیگ\nproxy.txt: {stats.get('alive_telegram_proxies', 0)} پروکسی\nردشده پروکسی: {stats.get('skipped_telegram_proxies', 0)}\nناموفق: {stats.get('dead_total', 0)}",
         )
 
     def on_failed(self, error: str) -> None:
@@ -1016,10 +1453,15 @@ class MainWindow(QMainWindow):
         self.set_stage("خطا")
         self.progress_meta.setText("خطا")
         self.append_log(f"ERROR: {error}")
+        try:
+            engine.cleanup_xray_processes()
+        except Exception:
+            pass
         QMessageBox.critical(self, "خطا", error)
 
     def set_stage(self, text: str) -> None:
-        self.stage_label.setText(text)
+        if hasattr(self, "stage_label"):
+            self.stage_label.setText(text)
         self.progress_title.setText(text)
 
     def update_progress(self, done: int, total: int) -> None:
@@ -1046,8 +1488,72 @@ class MainWindow(QMainWindow):
     def append_log(self, line: str) -> None:
         if not hasattr(self, "log_box"):
             return
-        self.log_box.append(line)
+        safe = html_lib.escape(line)
+        color = "#a7b4c7"
+        bg = "transparent"
+        border = "#1f2937"
+        tag = "LOG"
+        if "ERROR" in line or "FAIL" in line or "خطا" in line:
+            color = "#ff7b8a"; bg = "#1a0b10"; border = "#4b1d28"; tag = "ERR"
+        elif "OK" in line or "تمام شد" in line or "آماده" in line:
+            color = "#63e6be"; bg = "#071510"; border = "#164d3c"; tag = "OK"
+        elif "INFO" in line or "مرحله" in line or "شروع" in line:
+            color = "#7dd3fc"; bg = "#07131f"; border = "#1d4b68"; tag = "INF"
+        elif "Prefilter" in line or "Xray" in line:
+            color = "#fde68a"; bg = "#171204"; border = "#55441b"; tag = "RUN"
+        self.log_box.append(
+            f'<div style="direction:rtl; unicode-bidi:plaintext; color:{color}; background:{bg}; border:1px solid {border}; padding:7px 10px; border-radius:10px; margin:3px 0;">'
+            f'<span style="color:#e5edf7; font-weight:800;">{tag}</span>&nbsp;&nbsp;{safe}</div>'
+        )
         self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
+
+    def refresh_result_tabs(self) -> None:
+        if not hasattr(self, "config_results"):
+            return
+        sub_text = ""
+        proxy_text = ""
+        try:
+            if engine.SUB_FILE.exists():
+                sub_text = engine.SUB_FILE.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            sub_text = ""
+        try:
+            if engine.PROXY_FILE.exists():
+                proxy_text = engine.PROXY_FILE.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            proxy_text = ""
+        sub_count = len([x for x in sub_text.splitlines() if x.strip()])
+        proxy_count = len([x for x in proxy_text.splitlines() if x.strip()])
+        self.config_results.setPlainText(sub_text.strip() or "هنوز خروجی sub.txt ساخته نشده است.")
+        self.proxy_results.setPlainText(proxy_text.strip() or "هنوز خروجی proxy.txt ساخته نشده است.")
+        if hasattr(self, "config_count_label"):
+            self.config_count_label.setText(f"{sub_count} کانفیگ")
+        if hasattr(self, "proxy_count_label"):
+            self.proxy_count_label.setText(f"{proxy_count} پروکسی")
+
+    def copy_result_box(self, kind: str) -> None:
+        box = self.proxy_results if kind == "proxies" else self.config_results
+        name = "proxy.txt" if kind == "proxies" else "sub.txt"
+        text = box.toPlainText().strip()
+        if not text or text.startswith("هنوز خروجی") or text.startswith("در حال"):
+            self.append_log(f"INFO چیزی برای کپی کردن در {name} نیست.")
+            return
+        QApplication.clipboard().setText(text)
+        self.append_log(f"OK محتوای {name} کپی شد.")
+
+    def copy_current_result_tab(self) -> None:
+        current = self.pages.currentIndex()
+        if current == getattr(self, "proxies_page_index", -1):
+            self.copy_result_box("proxies")
+        else:
+            self.copy_result_box("configs")
+
+    def clear_result_tabs(self) -> None:
+        if hasattr(self, "config_results"):
+            self.config_results.setPlainText("در حال آماده‌سازی خروجی...")
+            self.proxy_results.setPlainText("در حال آماده‌سازی خروجی...")
+            self.config_count_label.setText("0 کانفیگ")
+            self.proxy_count_label.setText("0 پروکسی")
 
     def open_output_folder(self) -> None:
         path = str(engine.ROOT)
@@ -1056,27 +1562,101 @@ class MainWindow(QMainWindow):
         else:
             webbrowser.open(f"file://{path}")
 
+    def animate_sidebar_width(self, target: int) -> None:
+        if not hasattr(self, "sidebar"):
+            return
+        start = self.sidebar.width() or target
+        if abs(start - target) < 2:
+            self.sidebar.setFixedWidth(target)
+            return
+        self.sidebar.setMinimumWidth(min(start, target))
+        self.sidebar.setMaximumWidth(max(start, target))
+        anim = QPropertyAnimation(self.sidebar, b"maximumWidth", self)
+        anim.setDuration(130)
+        anim.setStartValue(start)
+        anim.setEndValue(target)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.finished.connect(lambda: self.sidebar.setFixedWidth(target))
+        self._sidebar_anim = anim
+        anim.start()
+
+    def toggle_sidebar(self) -> None:
+        self.sidebar_collapsed = not self.sidebar_collapsed
+        self.apply_responsive_mode(force=True)
+
+    def update_window_rounding(self) -> None:
+        maximized = self.isMaximized()
+        if hasattr(self, "root_layout"):
+            self.root_layout.setContentsMargins(0 if maximized else 10, 0 if maximized else 10, 0 if maximized else 10, 0 if maximized else 10)
+        if hasattr(self, "root"):
+            self.root.setProperty("maximized", maximized)
+            self.root.style().unpolish(self.root)
+            self.root.style().polish(self.root)
+            self.root.update()
+
+    def toggle_maximize(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            self.btn_maximize.setText("□")
+        else:
+            self.showMaximized()
+            self.btn_maximize.setText("❐")
+        QTimer.singleShot(20, self.update_window_rounding)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.LeftButton and event.position().y() <= 76:
+            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._drag_position is not None and event.buttons() & Qt.LeftButton and not self.isMaximized():
+            self.move(event.globalPosition().toPoint() - self._drag_position)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        self._drag_position = None
+        super().mouseReleaseEvent(event)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        try:
+            if self.worker and self.worker.isRunning():
+                self.worker.request_abort()
+            engine.cleanup_xray_processes()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         self.apply_responsive_mode()
+        self.update_window_rounding()
 
-    def apply_responsive_mode(self) -> None:
+    def apply_responsive_mode(self, force: bool = False) -> None:
         width = self.width()
-        compact = width < 1120
-        if compact != self.compact_nav:
+        compact = self.sidebar_collapsed or width < 1050
+        if force or compact != self.compact_nav:
             self.compact_nav = compact
-            self.sidebar.setFixedWidth(74 if compact else 176)
-            self.brand_text.setVisible(not compact)
+            self.animate_sidebar_width(76 if compact else 216)
+            self.sidebar_caption.setVisible(not compact)
             self.btn_open_side.setText("" if compact else "پوشه خروجی")
+            self.btn_open_side.setToolTip("پوشه خروجی")
             for btn, text in (
                 (self.nav_dashboard, "داشبورد"),
                 (self.nav_settings, "تنظیمات"),
                 (self.nav_channels, "کانال‌ها"),
+                (self.nav_configs, "کانفیگ‌ها"),
+                (self.nav_proxies, "پروکسی‌ها"),
             ):
                 btn.setText("" if compact else text)
+                btn.setToolTip(text)
                 btn.setToolButtonStyle(Qt.ToolButtonIconOnly if compact else Qt.ToolButtonTextBesideIcon)
-        # Cards become 2x2 on narrower windows.
-        columns = 2 if width < 1240 else 4
+                btn.setMinimumWidth(46 if compact else 170)
+        self.subtitle_label.setVisible(width >= 880)
+        columns = 1 if width < 900 else 2 if width < 1240 else 4
         for i, card in enumerate(self.stat_cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
@@ -1087,255 +1667,339 @@ class MainWindow(QMainWindow):
             app_instance.setFont(QFont("Vazirmatn", 10))
         self.setLayoutDirection(Qt.LeftToRight)
         self.setStyleSheet("""
-            * {
-                outline: none;
-            }
+            * { outline: none; }
+            QMainWindow { background: transparent; }
             QWidget {
                 background: transparent;
-                color: #eef6ff;
+                color: #e5edf7;
                 font-family: Vazirmatn, Vazir, Segoe UI, Arial;
                 font-size: 13px;
             }
-            QLabel, QFrame > QLabel, QWidget > QLabel {
-                background: transparent;
-            }
+            QLabel { background: transparent; }
             #AppRoot {
-                background: #020409;
-            }
-            #Sidebar {
-                background: #050912;
-                border: 1px solid #132033;
+                background: #11141a;
+                border: 1px solid #252b35;
                 border-radius: 22px;
             }
-            #BrandBox {
-                background: #070d17;
-                border: 1px solid #17263c;
+            #AppRoot[maximized="true"] {
+                border-radius: 0px;
+                border: none;
+            }
+            #TopBar {
+                background: #12161d;
+                border: 1px solid #242d3a;
+                border-radius: 20px;
+            }
+            #Sidebar, #ContentPanel {
+                background: #11151c;
+                border: 1px solid #202938;
+                border-radius: 22px;
+            }
+            #Panel, #PageHeader, #StatCard {
+                background: #12161d;
+                border: 1px solid #222c3a;
                 border-radius: 18px;
             }
-            #BrandText {
-                font-size: 15px;
-                font-weight: 900;
-                line-height: 120%;
-                color: #ffffff;
-            }
-            #MainPanel {
-                background: #04070d;
-                border: 1px solid #101b2b;
-                border-radius: 24px;
-            }
-            #TopHeader, #PageHeader, #Panel, #StatCard {
-                background: #070b13;
-                border: 1px solid #152238;
-                border-radius: 20px;
+            #Panel:hover, #PageHeader:hover, #StatCard:hover {
+                background: #111821;
+                border-color: #2f3b4d;
             }
             QStackedWidget, QStackedWidget > QWidget, QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
                 background: transparent;
                 border: none;
             }
             #Title {
-                font-size: 24px;
+                font-size: 22px;
                 font-weight: 900;
                 color: #ffffff;
-                background: transparent;
+                letter-spacing: -0.25px;
             }
             #PageTitle {
-                font-size: 20px;
+                font-size: 18px;
                 font-weight: 900;
                 color: #ffffff;
-                background: transparent;
             }
-            #Subtitle, #Muted, #CardLabel, #FieldLabel {
-                color: #8fa3bd;
+            #Subtitle, #Muted, #CardLabel, #FieldLabel, #SidebarCaption {
+                color: #9aa8ba;
                 font-size: 12px;
-                background: transparent;
+            }
+            #SidebarCaption {
+                font-weight: 800;
+                padding: 4px 8px 8px 8px;
             }
             #SectionTitle {
-                color: #f2f8ff;
+                color: #f6f8fb;
                 font-size: 15px;
                 font-weight: 900;
-                background: transparent;
             }
-            #StagePill {
-                background: #081729;
-                color: #76e9ff;
-                border: 1px solid #1e5a83;
+            #PageTitle, #Subtitle, #FieldLabel, #SectionTitle, #Hint, #SidebarCaption {
+                qproperty-alignment: AlignRight;
+            }
+            #Title { qproperty-alignment: AlignLeft; }
+            #Hint { text-align: right; direction: rtl; }
+            #StagePill, #VersionPill, #SoftPill {
+                background: #101926;
+                color: #c9d7e8;
+                border: 1px solid #29364a;
                 border-radius: 14px;
-                padding: 8px 13px;
+                padding: 8px 12px;
                 font-weight: 900;
             }
+            #StagePill {
+                color: #67e8f9;
+                border-color: #25506d;
+            }
             #CardIcon, #LargeIcon {
-                background: #081a2d;
-                border: 1px solid #1f5d87;
+                background: #111d2b;
+                border: 1px solid #2a455f;
                 border-radius: 13px;
             }
             #CardValue {
-                color: #70e8ff;
-                font-size: 27px;
+                color: #67e8f9;
+                font-size: 26px;
                 font-weight: 900;
-                background: transparent;
             }
-            #FieldBox {
-                background: #050912;
-                border: 1px solid #14233a;
-                border-radius: 16px;
+            #SettingsSection {
+                background: #0f141c;
+                border: 1px solid #202a39;
+                border-radius: 18px;
             }
+            #FieldBox, #OptionsBox, #ResetBox {
+                background: #0f131a;
+                border: 1px solid #202a39;
+                border-radius: 15px;
+            }
+            QFrame#FieldBox[accent="0"] { border-color: #23364f; background: #0d131c; }
+            QFrame#FieldBox[accent="1"] { border-color: #243b36; background: #0b1614; }
+            QFrame#FieldBox[accent="2"] { border-color: #3c334d; background: #120f1b; }
+            QFrame#FieldBox[accent="3"] { border-color: #4a3720; background: #171107; }
+            QFrame#FieldBox[accent="4"] { border-color: #3f2832; background: #160d12; }
             QToolButton {
                 background: transparent;
-                color: #9fb2c9;
+                color: #c5d0de;
                 border: 1px solid transparent;
-                border-radius: 14px;
+                border-radius: 13px;
                 padding: 9px 10px;
-                text-align: left;
                 font-weight: 900;
+                text-align: left;
             }
             QToolButton:hover {
-                background: #0b1422;
-                border-color: #1d314d;
+                background: #151d27;
+                border-color: #303b4f;
                 color: #ffffff;
             }
             QToolButton:checked {
-                background: #0d2949;
-                border-color: #2a75bd;
+                background: #172335;
+                border-color: #3b82f6;
                 color: #ffffff;
             }
+            QToolButton#TopIconButton, QToolButton#WindowButton {
+                background: #111821;
+                color: #dbe7f5;
+                border: 1px solid #273246;
+                border-radius: 13px;
+                font-weight: 900;
+            }
+            QToolButton#TopIconButton:hover, QToolButton#WindowButton:hover {
+                background: #182232;
+                border-color: #3b82f6;
+            }
+            QToolButton#CloseButton {
+                background: #1a0b10;
+                color: #ff9ca8;
+                border: 1px solid #49202b;
+                border-radius: 13px;
+                font-weight: 900;
+            }
+            QToolButton#CloseButton:hover {
+                background: #ef4444;
+                color: white;
+                border-color: #ff7a86;
+            }
             QPushButton {
-                background: #0b1422;
-                border: 1px solid #1b2d47;
+                background: #111821;
+                border: 1px solid #263244;
                 border-radius: 14px;
                 padding: 10px 14px;
-                color: #eff7ff;
+                color: #edf3fb;
                 font-weight: 900;
             }
             QPushButton:hover {
-                background: #101d31;
-                border-color: #30608f;
+                background: #172233;
+                border-color: #3b82f6;
             }
             QPushButton:pressed {
-                background: #07101c;
+                background: #0c121a;
                 padding-top: 11px;
                 padding-bottom: 9px;
             }
             QPushButton:disabled {
-                color: #536278;
-                border-color: #111b2b;
-                background: #060a11;
+                color: #617086;
+                border-color: #1b2430;
+                background: #0c1118;
             }
             QPushButton#PrimaryButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1f6feb, stop:0.55 #00aaff, stop:1 #37f5d0);
-                border: 1px solid #58b8ff;
-                color: white;
+                background: #2563eb;
+                border: 1px solid #38bdf8;
+                color: #ffffff;
+            }
+            QPushButton#PrimaryButton:hover {
+                background: #1d4ed8;
+                border-color: #67e8f9;
             }
             QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTextEdit {
-                background: #03060b;
-                border: 1px solid #172842;
+                background: #0f131a;
+                border: 1px solid #263244;
                 border-radius: 12px;
                 padding: 9px;
-                color: #f2f8ff;
-                selection-background-color: #1f6feb;
+                color: #edf3fb;
+                selection-background-color: #2563eb;
             }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTextEdit:focus {
-                border-color: #2f9fff;
-                background: #050a12;
+                border-color: #3b82f6;
+                background: #0e1620;
             }
-            QSpinBox {
-                padding-right: 9px;
-                padding-left: 9px;
-            }
+            QSpinBox { padding-right: 9px; padding-left: 9px; }
             QSpinBox::up-button, QSpinBox::down-button {
-                width: 0px;
-                height: 0px;
-                border: none;
-                background: transparent;
+                width: 0px; height: 0px; border: none; background: transparent;
             }
-            QComboBox::drop-down {
-                width: 28px;
-                border: none;
-                background: transparent;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border: none;
-                width: 0;
-                height: 0;
-            }
+            QComboBox::drop-down { width: 26px; border: none; background: transparent; }
+            QComboBox::down-arrow { image: none; border: none; width: 0; height: 0; }
             QComboBox QAbstractItemView {
-                background: #050912;
-                border: 1px solid #1f3552;
-                color: #eef6ff;
-                selection-background-color: #0d2949;
+                background: #0f131a;
+                border: 1px solid #263244;
+                color: #edf3fb;
+                selection-background-color: #172335;
                 outline: none;
             }
             QTextEdit#LogBox, QPlainTextEdit {
                 font-family: Consolas, Vazirmatn, monospace;
                 font-size: 12px;
-                line-height: 145%;
+                line-height: 150%;
+            }
+
+            QTextEdit#ResultBox {
+                font-family: Consolas, Vazirmatn, monospace;
+                font-size: 12px;
+                border-color: #2f3c50;
+                background: #0b1016;
             }
             QProgressBar {
-                background: #03060b;
-                border: 1px solid #18304d;
-                border-radius: 14px;
-                min-height: 30px;
+                background: #0f131a;
+                border: 1px solid #263244;
+                border-radius: 12px;
+                min-height: 28px;
                 text-align: center;
                 font-weight: 900;
                 color: #ffffff;
             }
             QProgressBar::chunk {
-                border-radius: 13px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1f6feb, stop:0.45 #00b7ff, stop:1 #4dffd8);
+                border-radius: 11px;
+                background: #3b82f6;
             }
             QCheckBox {
-                color: #dcecff;
+                color: #e5edf7;
                 font-weight: 900;
                 spacing: 8px;
                 background: transparent;
             }
             QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-                border-radius: 6px;
-                border: 1px solid #2a496e;
-                background: #03060b;
+                width: 18px; height: 18px;
+                border-radius: 5px;
+                border: 1px solid #3a4658;
+                background: #0f131a;
             }
             QCheckBox::indicator:checked {
-                background: #0f7cff;
-                border: 1px solid #76e9ff;
+                background: #3b82f6;
+                border: 1px solid #7dd3fc;
             }
             #Hint {
-                background: #070b13;
-                border: 1px solid #152238;
-                border-radius: 16px;
-                color: #9fb2ce;
+                background: #12161d;
+                border: 1px solid #222c3a;
+                border-radius: 15px;
+                color: #a7b4c7;
                 padding: 14px;
             }
             QScrollBar:vertical {
-                background: #03060b;
+                background: #0f131a;
                 width: 10px;
                 margin: 0;
                 border-radius: 5px;
             }
             QScrollBar::handle:vertical {
-                background: #1b2d47;
+                background: #29364a;
                 border-radius: 5px;
                 min-height: 34px;
             }
-            QScrollBar::handle:vertical:hover {
-                background: #2a496e;
-            }
+            QScrollBar::handle:vertical:hover { background: #3b4a60; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                height: 0;
-                background: transparent;
+                height: 0; background: transparent;
+            }
+            QTabWidget#ResultsTabs::pane {
+                border: 1px solid #263244;
+                border-radius: 14px;
+                background: #0f131a;
+                top: -1px;
+            }
+            QTabWidget#ResultsTabs::tab-bar {
+                alignment: right;
+            }
+            QTabBar::tab {
+                background: #101720;
+                color: #9aa8ba;
+                border: 1px solid #263244;
+                border-bottom: none;
+                padding: 9px 18px;
+                margin-left: 4px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                font-weight: 900;
+            }
+            QTabBar::tab:selected {
+                background: #182132;
+                color: #ffffff;
+                border-color: #3b82f6;
+            }
+            QTextEdit#ResultBox {
+                font-family: Consolas, Vazirmatn, monospace;
+                font-size: 12px;
+                background: #0b0f14;
+                border: none;
+                border-radius: 12px;
+                color: #dbe7f5;
+                padding: 10px;
             }
             QMessageBox {
-                background: #050912;
+                background: #0f1218;
+                color: #edf3fb;
+                font-family: Vazirmatn, Vazir, Segoe UI, Arial;
+            }
+            QMessageBox QLabel {
+                color: #edf3fb;
+                font-family: Vazirmatn, Vazir, Segoe UI, Arial;
+                qproperty-alignment: AlignRight;
             }
         """)
 
 
+def set_windows_app_id() -> None:
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Dicode.ConfigChecker.1")
+    except Exception:
+        pass
+
+
 def main() -> int:
+    set_windows_app_id()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
     app.setApplicationVersion(APP_VERSION)
+    icon_path = resource_path("assets", "app.ico")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     win = MainWindow()
     win.show()
     return app.exec()

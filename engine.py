@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 APP_NAME = "Dicode Telegram Config Checker"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", ROOT)).resolve() if IS_FROZEN else ROOT
@@ -116,7 +116,6 @@ t.me/NETMelliAnti
 t.me/Blue_star_Vip
 t.me/Maznet
 t.me/cpy_teeL
-t.me/NetAccount
 t.me/beshcan
 t.me/Parsashonam
 t.me/ProxySnipe
@@ -148,12 +147,136 @@ t.me/chatnakonn
 t.me/proxyxix
 t.me/letsproxys
 t.me/proxyy_1404
-t.me/+JtInm8-guq41OTJi
 t.me/duckvp_n
 t.me/proxy_kafee
 t.me/WizProxy
 t.me/ShadowProxy66
 t.me/persianvpnhub
+t.me/vasl_bashim
+t.me/makvaslim
+t.me/v2ray_free_conf
+t.me/V2rayConfigList
+t.me/vpnfail_v2ray
+t.me/vlesskeys
+t.me/oneclickvpnkeys
+t.me/ConfingV2RaayNG
+t.me/v2ray_fspeed
+t.me/Daily_Configs
+t.me/filembad
+t.me/bored_vpn
+t.me/Surfboardv2ray
+t.me/outlineOpenKey
+t.me/GH_v2rayng
+t.me/mtproxy_lists
+t.me/v2raysvmess
+t.me/freewireguard
+t.me/warpscanner
+t.me/ConfigWireguard
+t.me/v2nodes
+t.me/GrizzlyVPN
+t.me/mobilesignal
+t.me/persianelon
+t.me/Rayan_Config
+t.me/v2ray_Extractor
+t.me/vpnowl
+t.me/kiava
+t.me/azadi_az_inja_migzare
+t.me/ELiV2RAY
+t.me/PrivateVPNs
+t.me/DirectVPN
+t.me/Everyday_VPN
+t.me/vpnstorefast
+t.me/v2ray_configs_pool
+t.me/V2Ray_Market11
+t.me/v2Line
+t.me/XV2ray
+t.me/v2rayvpn_official
+t.me/zedmodeonVPN
+t.me/ArV2ray
+t.me/redfree8
+t.me/safeNet4All
+t.me/freedom_guard_net
+t.me/Begoo_VPN
+t.me/FlexEtesal
+t.me/capoit
+t.me/foced
+t.me/Proxi_ConFiGS
+t.me/letsproxys1
+t.me/blackRay
+t.me/V2rayTun0
+t.me/AzadInternet_TV
+t.me/NetMeli9
+t.me/i10VPN
+t.me/Zed_NetMeli
+t.me/Pruuxi
+t.me/confignetmeliina
+t.me/npvon
+t.me/iicenet
+t.me/PathToArrive
+t.me/madzteam
+t.me/YamYamProxy
+t.me/Skyportall
+t.me/eshgheabadii_facts
+t.me/Masyakata
+t.me/marambashi2
+t.me/XIXVPN
+t.me/xsfilternet
+t.me/Vpn_Shield
+t.me/payam_nsi
+t.me/xixv2ray
+t.me/confing_alski
+t.me/SOSkeyNET
+t.me/crayingroom
+t.me/Fast1one
+t.me/saministamm
+t.me/netazadi
+t.me/iranconnecting
+t.me/proxymtprotoir
+t.me/ParsiNetFree
+t.me/SwagMeli
+t.me/mitivpn
+t.me/Npv_Tnnel
+t.me/poroxybaz
+t.me/v2rayNG_Matsuri
+t.me/vmess_ir
+t.me/An0nymousTeam
+t.me/v2ray_cartel
+t.me/proxy_Shadowsocks
+t.me/V2rayng_Fast
+t.me/V2RFA
+t.me/Config_HATunnel
+t.me/vpn_naji
+t.me/V2ray_Alpha
+t.me/confing_Costume
+t.me/MARAMBASHI
+t.me/VPNConnectd
+t.me/iP_CF
+t.me/DailyV2RY
+t.me/ZibaNabz
+t.me/vpn_ioss
+t.me/ConfigV2rayNG
+t.me/hi_proxi
+t.me/Myporoxy
+t.me/MTProxyStar
+t.me/Gp_Config
+t.me/abc_configs
+t.me/ServerNett
+t.me/v2rayvpnchannel
+t.me/ProxyTyper
+t.me/mtp4tg
+t.me/openkeysfree
+t.me/v2rayshare
+t.me/cloudnet6000
+t.me/shadowsockskeys
+t.me/vless_vmess
+t.me/armodchannel
+t.me/keysOutline
+t.me/warpplus
+t.me/iSeqaro
+t.me/v2rayNGconfig
+t.me/IP_CF_Configs
+t.me/V2rayNG3
+t.me/VmessProtocol
 """.strip()
 
 CONFIG_REGEXES = [
@@ -206,7 +329,9 @@ def env_bool(key: str, default: bool) -> bool:
 
 PER_CHANNEL_LIMIT = env_int("PER_CHANNEL_LIMIT", 20)
 MAIN_CHANNEL_LIMIT = env_int("MAIN_CHANNEL_LIMIT", 30)
-MAIN_CHANNEL = env_str("MAIN_CHANNEL", "persianvpnhub")
+MAIN_CHANNELS_RAW = env_str("MAIN_CHANNELS", env_str("MAIN_CHANNEL", "persianvpnhub"))
+MAIN_CHANNEL = MAIN_CHANNELS_RAW.split(",")[0].strip() or "persianvpnhub"
+MAIN_CHANNELS = {x.strip().replace("t.me/", "").replace("https://", "").replace("http://", "").split("/")[-1].lower() for x in re.split(r"[,\s]+", MAIN_CHANNELS_RAW) if x.strip()}
 FETCH_WORKERS = env_int("FETCH_WORKERS", 8)
 FETCH_TIMEOUT = env_float("FETCH_TIMEOUT", 15.0)
 
@@ -225,9 +350,12 @@ MIN_SUCCESS = env_int("MIN_SUCCESS", 3)
 ATTEMPT_GAP_SECONDS = env_float("ATTEMPT_GAP_SECONDS", 0.25)
 SUB_TAG_PREFIX = env_str("SUB_TAG_PREFIX", "t.me/dicodeir")
 RENAME_CONFIG_NAMES = env_bool("RENAME_CONFIG_NAMES", True)
+CHECK_V2RAY_CONFIGS = env_bool("CHECK_V2RAY_CONFIGS", True)
 AUTO_DOWNLOAD_XRAY = env_str("AUTO_DOWNLOAD_XRAY", "1").lower() not in {"0", "false", "no", "off"}
 XRAY_DOWNLOAD_TIMEOUT = env_float("XRAY_DOWNLOAD_TIMEOUT", 60.0)
+DOWNLOAD_PROXY = env_str("DOWNLOAD_PROXY", env_str("GITHUB_PROXY", ""))
 
+CHECK_TELEGRAM_PROXIES = env_bool("CHECK_TELEGRAM_PROXIES", True)
 WRITE_DEAD_TO_REPORT = env_str("WRITE_DEAD_TO_REPORT", "1") not in {"0", "false", "False", "no"}
 
 
@@ -321,13 +449,13 @@ def ensure_files() -> None:
 
 
 def default_env_text() -> str:
-    return """# Dicode Telegram Config Checker v1
+    return """# Dicode Telegram Config Checker v1.0.1
 # GitHub-friendly settings. Change values here without editing the code.
 
 # Collection limits
 PER_CHANNEL_LIMIT=20
 MAIN_CHANNEL_LIMIT=30
-MAIN_CHANNEL=persianvpnhub
+MAIN_CHANNELS=
 FETCH_WORKERS=8
 FETCH_TIMEOUT=15
 
@@ -360,6 +488,8 @@ ATTEMPT_GAP_SECONDS=0.25
 # RENAME_CONFIG_NAMES=1 rewrites remarks as SUB_TAG_PREFIX-N. Set it to 0 to keep original remarks.
 RENAME_CONFIG_NAMES=1
 SUB_TAG_PREFIX=t.me/dicodeir
+CHECK_V2RAY_CONFIGS=1
+CHECK_TELEGRAM_PROXIES=1
 WRITE_DEAD_TO_REPORT=1
 """
 
@@ -417,7 +547,7 @@ def fetch_url(url: str) -> str:
 
 
 def fetch_channel(channel: str) -> dict[str, Any]:
-    limit = MAIN_CHANNEL_LIMIT if channel.lower() == MAIN_CHANNEL.lower() else PER_CHANNEL_LIMIT
+    limit = MAIN_CHANNEL_LIMIT if channel.lower() in MAIN_CHANNELS else PER_CHANNEL_LIMIT
     url = f"https://t.me/s/{channel}"
     started = time.time()
     try:
@@ -491,7 +621,7 @@ def stage1_collect() -> dict[str, Any]:
     channels = read_channels()
     print(c("[1/2] Stage 1: collecting configs from Telegram previews", Colors.BLUE))
     print(f"  Channels: {len(channels)}")
-    print(f"  Per channel: {PER_CHANNEL_LIMIT} | main @{MAIN_CHANNEL}: {MAIN_CHANNEL_LIMIT}")
+    print(f"  Rank 2 per channel: {PER_CHANNEL_LIMIT} | Rank 1 channels: {len(MAIN_CHANNELS)} | Rank 1 per channel: {MAIN_CHANNEL_LIMIT}")
     print()
 
     results: list[dict[str, Any]] = []
@@ -526,7 +656,7 @@ def stage1_collect() -> dict[str, Any]:
         "stage": 1,
         "channels": len(channels),
         "per_channel_limit": PER_CHANNEL_LIMIT,
-        "main_channel": MAIN_CHANNEL,
+        "priority_one_channels": sorted(MAIN_CHANNELS),
         "main_channel_limit": MAIN_CHANNEL_LIMIT,
         "unique_configs": len(lines),
         "elapsed_seconds": elapsed,
@@ -1005,6 +1135,23 @@ def platform_xray_asset_keyword() -> str:
     return "Xray-windows-64.zip"
 
 
+def normalize_proxy_url(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if "://" not in value:
+        value = "http://" + value
+    return value
+
+
+def urlopen_with_optional_proxy(req: urllib.request.Request, timeout: float):
+    proxy = normalize_proxy_url(DOWNLOAD_PROXY)
+    if proxy:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        return opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
 def download_url_to_file(url: str, target: Path, timeout: float) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(
@@ -1014,7 +1161,7 @@ def download_url_to_file(url: str, target: Path, timeout: float) -> None:
             "Accept": "application/octet-stream,*/*",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r, target.open("wb") as f:
+    with urlopen_with_optional_proxy(req, timeout=timeout) as r, target.open("wb") as f:
         shutil.copyfileobj(r, f)
 
 
@@ -1026,7 +1173,7 @@ def get_latest_xray_asset() -> tuple[str, str]:
             "Accept": "application/vnd.github+json",
         },
     )
-    with urllib.request.urlopen(req, timeout=XRAY_DOWNLOAD_TIMEOUT) as r:
+    with urlopen_with_optional_proxy(req, timeout=XRAY_DOWNLOAD_TIMEOUT) as r:
         data = json.loads(r.read().decode("utf-8", errors="ignore"))
 
     wanted = platform_xray_asset_keyword().lower()
@@ -1112,6 +1259,8 @@ def ensure_xray_binary() -> Optional[Path]:
 
     try:
         print(c("  Xray core: not found; downloading latest release...", Colors.YELLOW))
+        if DOWNLOAD_PROXY:
+            print(f"  Download proxy: {normalize_proxy_url(DOWNLOAD_PROXY)}")
         name, url = get_latest_xray_asset()
         print(f"  Asset: {name}")
         download_url_to_file(url, tmp_zip, XRAY_DOWNLOAD_TIMEOUT)
@@ -1185,10 +1334,21 @@ def make_xray_config(outbound: dict[str, Any], socks_port: int) -> dict[str, Any
     }
 
 
+ACTIVE_XRAY_PROCESSES: list[subprocess.Popen] = []
+
+
+def _windows_creation_flags() -> int:
+    if not platform.system().lower().startswith("win"):
+        return 0
+    flags = subprocess.CREATE_NO_WINDOW
+    # CREATE_NEW_PROCESS_GROUP makes cleanup more reliable on Windows.
+    flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    return flags
+
+
 def run_xray_process(xray_path: Path, config_path: Path) -> subprocess.Popen:
-    # Xray's modern CLI uses: xray run -config file.json
-    # Some older variants accept -c as alias, but -config is the common documented shape.
-    return subprocess.Popen(
+    # Xray's modern CLI uses: xray run -config file.json.
+    proc = subprocess.Popen(
         [str(xray_path), "run", "-config", str(config_path)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -1196,8 +1356,10 @@ def run_xray_process(xray_path: Path, config_path: Path) -> subprocess.Popen:
         text=True,
         encoding="utf-8",
         errors="ignore",
-        creationflags=subprocess.CREATE_NO_WINDOW if platform.system().lower().startswith("win") else 0,
+        creationflags=_windows_creation_flags(),
     )
+    ACTIVE_XRAY_PROCESSES.append(proc)
+    return proc
 
 
 def wait_port_open(host: str, port: int, timeout: float) -> bool:
@@ -1216,11 +1378,49 @@ def terminate_process(proc: subprocess.Popen) -> None:
         if proc.poll() is None:
             proc.terminate()
             try:
-                proc.wait(timeout=2)
+                proc.wait(timeout=1.5)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                if platform.system().lower().startswith("win"):
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=3,
+                        )
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+        try:
+            if proc.stderr:
+                proc.stderr.close()
+        except Exception:
+            pass
     except Exception:
         pass
+    finally:
+        try:
+            if proc in ACTIVE_XRAY_PROCESSES:
+                ACTIVE_XRAY_PROCESSES.remove(proc)
+        except Exception:
+            pass
+
+
+def cleanup_xray_processes() -> None:
+    """Terminate every Xray process launched by this app.
+
+    The checker can spawn many short-lived Xray cores while testing. This cleanup
+    keeps local ports free for v2rayN, V2Ray, and other clients after a scan.
+    """
+    for proc in list(ACTIVE_XRAY_PROCESSES):
+        terminate_process(proc)
 
 
 def socks5_http_delay_ms(socks_host: str, socks_port: int, url: str, timeout: float) -> tuple[Optional[int], str]:
@@ -1339,6 +1539,83 @@ def tcp_connect_delay_ms(host: str, port: int, timeout: float) -> tuple[Optional
         return None, e.__class__.__name__
 
 
+def telegram_socks_delay_ms(host: str, port: int, timeout: float) -> tuple[Optional[int], str]:
+    """Validate Telegram SOCKS proxies by creating a SOCKS5 tunnel to a Telegram DC."""
+    target_host = "149.154.167.50"
+    target_port = 443
+    started = time.perf_counter()
+    s: Optional[socket.socket] = None
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall(b"\x05\x01\x00")
+        resp = recv_exact(s, 2)
+        if len(resp) != 2 or resp[0] != 5 or resp[1] != 0:
+            return None, "socks_auth_failed"
+        host_bytes = target_host.encode("ascii")
+        req = b"\x05\x01\x00\x03" + bytes([len(host_bytes)]) + host_bytes + int(target_port).to_bytes(2, "big")
+        s.sendall(req)
+        head = recv_exact(s, 4)
+        if len(head) != 4 or head[1] != 0:
+            code = head[1] if len(head) >= 2 else "short"
+            return None, f"socks_tunnel_failed_{code}"
+        atyp = head[3]
+        if atyp == 1:
+            _ = recv_exact(s, 4)
+        elif atyp == 3:
+            ln = recv_exact(s, 1)
+            _ = recv_exact(s, ln[0] if ln else 0)
+        elif atyp == 4:
+            _ = recv_exact(s, 16)
+        _ = recv_exact(s, 2)
+        return int((time.perf_counter() - started) * 1000), ""
+    except Exception as e:
+        return None, e.__class__.__name__
+    finally:
+        try:
+            if s:
+                s.close()
+        except Exception:
+            pass
+
+
+def telegram_mtproto_delay_ms(host: str, port: int, timeout: float) -> tuple[Optional[int], str]:
+    """Stable MTProto proxy reachability check.
+
+    Telegram's full MTProto proxy auth is client-specific, so this check measures
+    connect latency and rejects endpoints that immediately close the socket.
+    It is stricter than a bare TCP connect and avoids accepting many dead ports.
+    """
+    started = time.perf_counter()
+    s: Optional[socket.socket] = None
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(0.18)
+        try:
+            data = s.recv(1, socket.MSG_PEEK)
+            if data == b"":
+                return None, "immediate_close"
+        except socket.timeout:
+            pass
+        except BlockingIOError:
+            pass
+        return int((time.perf_counter() - started) * 1000), ""
+    except Exception as e:
+        return None, e.__class__.__name__
+    finally:
+        try:
+            if s:
+                s.close()
+        except Exception:
+            pass
+
+
+def telegram_proxy_delay_ms(ep: Endpoint) -> tuple[Optional[int], str]:
+    if ep.protocol == "telegram-socks":
+        return telegram_socks_delay_ms(ep.host, ep.port, TCP_TIMEOUT)
+    return telegram_mtproto_delay_ms(ep.host, ep.port, TCP_TIMEOUT)
+
+
 def summarize_samples(samples: list[int], ok: bool) -> tuple[Optional[int], Optional[int], Optional[int]]:
     if not samples or not ok:
         return None, None, None
@@ -1363,8 +1640,12 @@ def repeated_test(ep: Endpoint, xray_path: Optional[Path]) -> TestResult:
             tester = "xray-http"
             ms, err = xray_attempt(ep.raw, xray_path)  # type: ignore[arg-type]
         else:
-            tester = "tcp-fallback" if ep.kind == "v2ray" else "tcp-proxy"
-            ms, err = tcp_connect_delay_ms(ep.host, ep.port, TCP_TIMEOUT)
+            if ep.kind == "mtproto":
+                tester = "telegram-proxy-stable"
+                ms, err = telegram_proxy_delay_ms(ep)
+            else:
+                tester = "tcp-fallback"
+                ms, err = tcp_connect_delay_ms(ep.host, ep.port, TCP_TIMEOUT)
         if ms is not None:
             samples.append(ms)
         else:
@@ -1407,12 +1688,25 @@ def stage2_test() -> dict[str, Any]:
     items = read_stage1_configs()
     endpoints: list[Endpoint] = []
     unsupported: list[str] = []
+    skipped_configs: list[str] = []
+    skipped_proxies: list[str] = []
     for item in items:
         ep = parse_endpoint(item["raw"], item.get("source", "stage1"))
         if ep:
+            if ep.kind == "mtproto" and not CHECK_TELEGRAM_PROXIES:
+                skipped_proxies.append(item["raw"])
+                continue
+            if ep.kind != "mtproto" and not CHECK_V2RAY_CONFIGS:
+                skipped_configs.append(item["raw"])
+                continue
             endpoints.append(ep)
         else:
             unsupported.append(item["raw"])
+
+    if skipped_configs:
+        print(c(f"  V2Ray/Xray config checking disabled; skipped {len(skipped_configs)} configs.", Colors.YELLOW))
+    if skipped_proxies:
+        print(c(f"  Telegram proxy checking disabled; skipped {len(skipped_proxies)} proxies.", Colors.YELLOW))
 
     xray_path = ensure_xray_binary()
     if TEST_MODE in {"auto", "xray"}:
@@ -1496,8 +1790,10 @@ def stage2_test() -> dict[str, Any]:
         "settings": {
             "per_channel_limit": PER_CHANNEL_LIMIT,
             "main_channel_limit": MAIN_CHANNEL_LIMIT,
-            "main_channel": MAIN_CHANNEL,
+            "priority_one_channels": sorted(MAIN_CHANNELS),
             "rename_config_names": RENAME_CONFIG_NAMES,
+            "check_v2ray_configs": CHECK_V2RAY_CONFIGS,
+            "check_telegram_proxies": CHECK_TELEGRAM_PROXIES,
             "sub_tag_prefix": SUB_TAG_PREFIX,
             "test_mode": TEST_MODE,
             "xray_path": str(xray_path) if xray_path else None,

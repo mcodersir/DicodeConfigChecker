@@ -1,141 +1,120 @@
-# Dicode Config Checker v1.0.0
+# Dicode Config Checker v1.0.1
 
-![Dicode Config Checker](assets/app.png)
+ابزار دسکتاپ ویندوز برای جمع‌آوری کانفیگ از کانال‌های عمومی تلگرام، تست کیفیت با Xray-core یا TCP fallback و ساخت خروجی‌های جداگانه `sub.txt` و `proxy.txt`.
 
-## فارسی
+## تغییرات اصلی نسخه 1.0.1
 
-**Dicode Config Checker** یک ابزار دسکتاپ ویندوزی برای جمع‌آوری کانفیگ از کانال‌های عمومی تلگرام، تست واقعی‌تر با Xray-core، و ساخت خروجی‌های آماده‌ی مصرف است.
+- لیست جدید کانال‌های رتبه دوم جایگزین شد: 202 کانال یکتا.
+- گزینه مستقل برای ساخت خروجی کانفیگ‌ها اضافه شد.
+- حالت فقط پروکسی اضافه شد.
+- اسکریپت build + deploy + release برای GitHub اضافه شد.
+- اسکریپت release نسخه قبلی `v1.0.0` و tag آن را قبل از انتشار `v1.0.1` حذف می‌کند.
 
-### قابلیت‌ها
+## حالت‌های خروجی
 
-- رابط کاربری دارک، مینمال و مناسب کاربر غیر برنامه‌نویس
-- دریافت دو مرحله‌ای: اول جمع‌آوری با اتصال فعال، بعد تست پس از قطع اتصال
-- تست کیفیت با Xray-core در حالت `auto` و `xray`
-- پیش‌فیلتر TCP برای حذف سریع سرورهای مرده
-- خروجی جدا برای کانفیگ‌ها و پروکسی‌های تلگرام
-- ساخت `sub.txt` و `sub_base64.txt`
-- ساخت `proxy.txt` و `proxy_base64.txt`
-- ویرایش تعداد کانفیگ هر کانال و کانال اصلی از داخل نرم‌افزار
-- ویرایش، افزودن، ایمپورت و پاکسازی لیست کانال‌ها
-- امکان روشن/خاموش کردن بازنویسی نام کانفیگ بعد از `#`
-- امکان تغییر متن نام کانفیگ، مثل `t.me/dicodeir-1`
-- دانلود Xray-core قبل از Build و Embed شدن داخل فایل EXE نهایی
+از صفحه تنظیمات:
 
-### خروجی‌ها
+- فقط کانفیگ: `بررسی کانفیگ‌های V2Ray/Xray` روشن، `بررسی پروکسی‌های تلگرام` خاموش.
+- فقط پروکسی: `بررسی کانفیگ‌های V2Ray/Xray` خاموش، `بررسی پروکسی‌های تلگرام` روشن.
+- هر دو: هر دو گزینه روشن.
 
-```text
-sub.txt
-sub_base64.txt
-proxy.txt
-proxy_base64.txt
-all_configs_stage1.txt
-alive_report.txt
-proxy_report.txt
-report.json
-run_log.txt
-```
+اگر هر دو گزینه خاموش باشند، برنامه شروع نمی‌شود و هشدار می‌دهد.
 
-### اجرای توسعه
+## اجرای تستی
 
 ```bat
 run_dev.bat
 ```
 
-### ساخت فایل EXE
+## ساخت EXE
 
 ```bat
 build_exe.bat
 ```
 
-خروجی:
+خروجی‌ها:
 
 ```text
 dist\DicodeConfigChecker.exe
+release\DicodeConfigChecker-v1.0.1-windows.exe
 ```
 
-### انتشار روی GitHub
+## دیپلوی و انتشار روی GitHub
 
-توکن را داخل کد یا فایل ذخیره نکنید. قبل اجرا، متغیر محیطی را ست کنید:
-
-```powershell
-$env:GITHUB_TOKEN="YOUR_NEW_TOKEN"
-.\publish_to_github.ps1
-```
-
-یا فایل زیر را اجرا کنید و توکن را وقتی پرسید وارد کنید:
+روی ویندوز این فایل را اجرا کن:
 
 ```bat
-publish_to_github.bat
+deploy_release_v1_0_1.bat
 ```
 
-اسکریپت انتشار این کارها را انجام می‌دهد:
+پیش‌نیازها:
 
-1. ساخت EXE
-2. ساخت ریپازیتوری `DicodeConfigChecker`
-3. Push کردن سورس کد
-4. ساخت تگ `v1.0.0`
-5. ساخت Release
-6. آپلود فایل EXE و ZIP سورس در Release
+- Python 3.10+
+- Git نصب‌شده و داخل PATH
+- GitHub token با دسترسی repo، یا متغیر محیطی `GITHUB_TOKEN`
 
----
-
-## English
-
-**Dicode Config Checker** is a Windows desktop tool for collecting configuration candidates from public Telegram channels, verifying them with Xray-core based quality testing, and generating ready-to-use subscription outputs.
-
-### Features
-
-- Polished dark GUI for non-technical users
-- Two-stage workflow: fetch first, disconnect, then test
-- Xray-core based real-delay style testing in `auto` and `xray` modes
-- TCP prefilter to skip clearly dead endpoints before heavier tests
-- Separate outputs for V2Ray/Xray configs and Telegram MTProto/SOCKS proxies
-- Generates `sub.txt` and `sub_base64.txt`
-- Generates `proxy.txt` and `proxy_base64.txt`
-- Edit per-channel and main-channel limits inside the app
-- Add, batch-edit, import, deduplicate and save channels from the GUI
-- Optional remark rewriting after `#`
-- Custom remark prefix, e.g. `t.me/dicodeir-1`
-- Xray-core is downloaded before build and embedded inside the final EXE
-
-### Build
-
-```bat
-build_exe.bat
-```
-
-Output:
+پیش‌فرض ریپو داخل اسکریپت:
 
 ```text
-dist\DicodeConfigChecker.exe
+mcodersir/DicodeConfigChecker
 ```
 
-### Publish to GitHub
+اگر ریپو فرق دارد، `publish_to_github.ps1` را باز کن و مقدارهای `Owner` و `RepoName` را تغییر بده.
 
-Do not store tokens in source code. Use an environment variable:
+## فایل‌های خروجی برنامه
 
-```powershell
-$env:GITHUB_TOKEN="YOUR_NEW_TOKEN"
-.\publish_to_github.ps1
+- `sub.txt`: کانفیگ‌های سالم V2Ray/Xray
+- `sub_base64.txt`: subscription base64
+- `proxy.txt`: پروکسی‌های سالم تلگرام
+- `proxy_base64.txt`: پروکسی‌های base64
+- `alive_report.txt`: گزارش کانفیگ‌ها
+- `proxy_report.txt`: گزارش پروکسی‌ها
+- `report.json`: گزارش کامل ماشینی
+
+
+## GitHub deploy if `api.github.com` fails
+
+If deployment fails with `The remote name could not be resolved: 'api.github.com'`, the EXE has usually been built already and only GitHub publishing failed.
+
+Use:
+
+```bat
+deploy_release_v1_0_1_with_proxy.bat
 ```
 
-The publisher script will create the repository, push the source, create `v1.0.0`, create a GitHub Release, and upload the Windows EXE plus source archive.
+Enter an HTTP proxy such as `http://127.0.0.1:7890` or `http://127.0.0.1:10809`.
 
-## Version
+If `release\DicodeConfigChecker-v1.0.1-windows.exe` already exists, use:
 
-The application version is intentionally kept at `1.0.0`.
-
----
-
-## Publish troubleshooting / رفع مشکل انتشار
-
-If publishing fails with `invalid credentials`, create a new GitHub token and set it only in the current PowerShell session:
-
-```powershell
-$env:GITHUB_TOKEN="YOUR_NEW_TOKEN"
-.\publish_to_github.ps1
+```bat
+publish_release_only_v1_0_1_with_proxy.bat
 ```
 
-اگر خطای `Could not resolve host: github.com` دیدی، مشکل از اتصال سیستم به GitHub است. پروکسی/VPN را روشن کن یا DNS را درست کن و دوباره اسکریپت را اجرا کن.
+For diagnosis:
 
-The release script does not store your token in `.git/config`; it uses an in-memory Git authorization header for push/tag operations.
+```bat
+diagnose_github_connection.bat
+```
+
+
+## Deploy v1.0.1 without local GitHub API
+
+If PowerShell cannot connect to `api.github.com`, use the GitHub Actions deploy path instead of the direct REST deploy path:
+
+```bat
+deploy_via_github_actions_v1_0_1.bat
+```
+
+This script only pushes the source and `v1.0.1` tag. GitHub Actions then builds the Windows EXE and creates the release on GitHub servers.
+
+Direct local deploy is still available through:
+
+```bat
+deploy_release_v1_0_1_with_proxy.bat
+```
+
+For proxy diagnostics:
+
+```bat
+diagnose_proxy_ports.bat
+```

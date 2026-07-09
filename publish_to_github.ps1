@@ -1,44 +1,47 @@
 param(
   [string]$RepoName = "DicodeConfigChecker",
   [string]$Owner = "mcodersir",
-  [string]$Tag = "v1.0.0",
+  [string]$Tag = "v1.0.1",
+  [string]$PreviousTag = "v1.0.0",
   [string]$Description = "Dicode Config Checker - Telegram config checker with Xray based quality testing",
   [string]$Proxy = "",
-  [switch]$NoBuild
+  [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$script:ActiveProxy = $null
+$script:RestProxy = $null
+if ($Proxy -and $Proxy.Trim().Length -gt 0) {
+  $Proxy = $Proxy.Trim()
+  $env:HTTP_PROXY = $Proxy
+  $env:HTTPS_PROXY = $Proxy
+  $env:ALL_PROXY = $Proxy
+  $env:NO_PROXY = "localhost,127.0.0.1"
+  if ($Proxy -match '^https?://') {
+    $script:RestProxy = $Proxy
+  }
+}
 
-function Write-Step($Text) { Write-Host "`n==> $Text" -ForegroundColor Cyan }
-function Write-Ok($Text) { Write-Host $Text -ForegroundColor Green }
-function Write-Warn($Text) { Write-Host $Text -ForegroundColor Yellow }
-function Fail($Text) { throw "`n$Text`n" }
+function Write-Step($Text) {
+  Write-Host "`n==> $Text" -ForegroundColor Cyan
+}
 
-function Normalize-Proxy($Value) {
-  if (-not $Value) { return $null }
-  $v = $Value.Trim()
-  if ($v.Length -eq 0) { return $null }
-  if ($v -notmatch "^https?://") { $v = "http://$v" }
-  return $v
+function Write-Info($Text) {
+  Write-Host $Text -ForegroundColor DarkGray
 }
 
 function Get-Token {
-  if ($env:GITHUB_TOKEN -and $env:GITHUB_TOKEN.Trim().Length -gt 0) { return $env:GITHUB_TOKEN.Trim() }
-  Write-Host "GitHub token is required." -ForegroundColor Yellow
-  Write-Host "Use a new token with repo/public_repo permission. Do not put tokens inside source files." -ForegroundColor Yellow
-  $secure = Read-Host "Paste GitHub token (hidden)" -AsSecureString
+  if ($env:GITHUB_TOKEN -and $env:GITHUB_TOKEN.Trim().Length -gt 0) {
+    return $env:GITHUB_TOKEN.Trim()
+  }
+  if ($env:GH_TOKEN -and $env:GH_TOKEN.Trim().Length -gt 0) {
+    return $env:GH_TOKEN.Trim()
+  }
+  $secure = Read-Host "Paste GitHub token with repo scope (input is hidden)" -AsSecureString
   $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-}
-
-function New-GitBasicHeader($Token) {
-  $pair = "x-access-token:$Token"
-  $bytes = [Text.Encoding]::ASCII.GetBytes($pair)
-  return [Convert]::ToBase64String($bytes)
 }
 
 function Invoke-GitHubJson($Method, $Uri, $Token, $Body = $null) {
@@ -49,158 +52,101 @@ function Invoke-GitHubJson($Method, $Uri, $Token, $Body = $null) {
     "User-Agent" = "DicodeConfigCheckerReleaseScript"
   }
 
-  $args = @{
+  $params = @{
     Method = $Method
     Uri = $Uri
     Headers = $headers
-    TimeoutSec = 30
+    ErrorAction = "Stop"
   }
-  if ($script:ActiveProxy) { $args.Proxy = $script:ActiveProxy }
   if ($Body -ne $null) {
-    $args.Body = ($Body | ConvertTo-Json -Depth 30)
-    $args.ContentType = "application/json; charset=utf-8"
+    $params.Body = ($Body | ConvertTo-Json -Depth 20)
+    $params.ContentType = "application/json; charset=utf-8"
+  }
+  if ($script:RestProxy) {
+    $params.Proxy = $script:RestProxy
   }
 
-  try { return Invoke-RestMethod @args }
-  catch {
-    $status = $null
-    if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
-    $msg = $_.Exception.Message
-    if ($status) { $msg = "HTTP $status - $msg" }
-    throw $msg
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+      return Invoke-RestMethod @params
+    } catch {
+      $msg = $_.Exception.Message
+      if ($attempt -ge 3) {
+        if ($msg -like "*remote name could not be resolved*" -or $msg -like "*NameResolutionFailure*" -or $msg -like "*api.github.com*") {
+          throw "Cannot reach api.github.com. This is a DNS/proxy/VPN problem, not a build problem. Run deploy_release_v1_0_1_with_proxy.bat and enter a local HTTP proxy like http://127.0.0.1:7890 or http://127.0.0.1:10809. Original error: $msg"
+        }
+        throw
+      }
+      Start-Sleep -Seconds (2 * $attempt)
+    }
   }
 }
 
-function Invoke-GitHubRaw($Method, $Uri, $Token, $ContentType, $InFile) {
-  $headers = @{
-    "Authorization" = "Bearer $Token"
-    "Accept" = "application/vnd.github+json"
-    "X-GitHub-Api-Version" = "2022-11-28"
-    "User-Agent" = "DicodeConfigCheckerReleaseScript"
-  }
-  $args = @{
-    Method = $Method
-    Uri = $Uri
-    Headers = $headers
-    ContentType = $ContentType
-    InFile = $InFile
-    TimeoutSec = 120
-  }
-  if ($script:ActiveProxy) { $args.Proxy = $script:ActiveProxy }
-  return Invoke-RestMethod @args
+function Test-Command($Name) {
+  return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-function Test-Command($Name) { return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+function Invoke-GitCommand {
+  param([string[]]$Arguments)
+  $allArgs = @()
+  if ($Proxy -and $Proxy.Trim().Length -gt 0) {
+    $allArgs += @("-c", "http.proxy=$Proxy", "-c", "https.proxy=$Proxy")
+  }
+  $allArgs += $Arguments
+  & git @allArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "git command failed."
+  }
+}
 
-function Test-Url($Url, $ProxyValue = $null) {
+function Remove-ReleaseAndTag($Owner, $RepoName, $Tag, $Token) {
+  Write-Step "Cleaning GitHub release/tag $Tag"
   try {
-    $args = @{
-      Uri = $Url
-      Method = "GET"
-      TimeoutSec = 12
-      UseBasicParsing = $true
-      Headers = @{ "User-Agent" = "DicodeConfigCheckerReleaseScript" }
-    }
-    if ($ProxyValue) { $args.Proxy = $ProxyValue }
-    Invoke-WebRequest @args | Out-Null
-    return $true
+    $rel = Invoke-GitHubJson "GET" "https://api.github.com/repos/$Owner/$RepoName/releases/tags/$Tag" $Token
+    Invoke-GitHubJson "DELETE" "https://api.github.com/repos/$Owner/$RepoName/releases/$($rel.id)" $Token | Out-Null
+    Write-Host "Deleted release: $Tag" -ForegroundColor Yellow
+  } catch {
+    Write-Host "Release not found or already removed: $Tag" -ForegroundColor DarkGray
   }
-  catch { return $false }
+  try {
+    Invoke-GitHubJson "DELETE" "https://api.github.com/repos/$Owner/$RepoName/git/refs/tags/$Tag" $Token | Out-Null
+    Write-Host "Deleted remote tag: $Tag" -ForegroundColor Yellow
+  } catch {
+    Write-Host "Remote tag not found or already removed: $Tag" -ForegroundColor DarkGray
+  }
 }
 
-function Resolve-GithubProxy {
-  $manualProxy = Normalize-Proxy $Proxy
-  if (-not $manualProxy) { $manualProxy = Normalize-Proxy $env:GITHUB_PROXY }
-  if (-not $manualProxy) { $manualProxy = Normalize-Proxy $env:HTTPS_PROXY }
-  if (-not $manualProxy) { $manualProxy = Normalize-Proxy $env:HTTP_PROXY }
-
-  if (Test-Url "https://api.github.com") {
-    $script:ActiveProxy = $null
-    Write-Ok "GitHub is reachable directly."
-    return
-  }
-
-  $candidates = New-Object System.Collections.Generic.List[string]
-  if ($manualProxy) { $candidates.Add($manualProxy) }
-  @(
-    "http://127.0.0.1:10809",
-    "http://127.0.0.1:7890",
-    "http://127.0.0.1:2080",
-    "http://127.0.0.1:2081",
-    "http://127.0.0.1:8080",
-    "http://localhost:10809",
-    "http://localhost:7890"
-  ) | ForEach-Object { if (-not $candidates.Contains($_)) { $candidates.Add($_) } }
-
-  foreach ($p in $candidates) {
-    Write-Warn "Testing proxy: $p"
-    if ((Test-Url "https://api.github.com" $p) -and (Test-Url "https://github.com" $p)) {
-      $script:ActiveProxy = $p
-      $env:HTTP_PROXY = $p
-      $env:HTTPS_PROXY = $p
-      Write-Ok "Using proxy for this run: $p"
-      return
-    }
-  }
-
-  Write-Warn "GitHub is not reachable directly and no common local HTTP proxy worked."
-  Write-Warn "If you use v2rayN, turn on System Proxy or enter its HTTP proxy, usually http://127.0.0.1:10809"
-  Write-Warn "If you use Clash, it is often http://127.0.0.1:7890"
-  $typed = Read-Host "Proxy URL or host:port, or press Enter to stop"
-  $typed = Normalize-Proxy $typed
-  if (-not $typed) { Fail "GitHub is not reachable. Turn on a working proxy/VPN for PowerShell/Git and run again." }
-  if (-not ((Test-Url "https://api.github.com" $typed) -and (Test-Url "https://github.com" $typed))) {
-    Fail "Proxy did not reach GitHub: $typed"
-  }
-  $script:ActiveProxy = $typed
-  $env:HTTP_PROXY = $typed
-  $env:HTTPS_PROXY = $typed
-  Write-Ok "Using proxy for this run: $typed"
-}
-
-function Run-GitAuth($Token, [string[]]$GitArgs) {
-  $basic = New-GitBasicHeader $Token
-  $prefix = @("-c", "credential.helper=", "-c", "http.https://github.com/.extraheader=AUTHORIZATION: basic $basic")
-  if ($script:ActiveProxy) {
-    $prefix += @("-c", "http.proxy=$script:ActiveProxy", "-c", "https.proxy=$script:ActiveProxy")
-  }
-  & git @prefix @GitArgs
-  if ($LASTEXITCODE -ne 0) { Fail "Git command failed: git $($GitArgs -join ' ')" }
-}
-
-function Run-Git([string[]]$GitArgs) {
-  $prefix = @()
-  if ($script:ActiveProxy) {
-    $prefix += @("-c", "http.proxy=$script:ActiveProxy", "-c", "https.proxy=$script:ActiveProxy")
-  }
-  & git @prefix @GitArgs
-  if ($LASTEXITCODE -ne 0) { Fail "Git command failed: git $($GitArgs -join ' ')" }
-}
-
+$Version = $Tag.TrimStart("v")
 $token = Get-Token
-if (-not $token) { Fail "GitHub token is empty." }
+if (-not $token) { throw "GitHub token is empty." }
+$env:GITHUB_TOKEN = $token
+$env:GH_TOKEN = $token
 
-Write-Step "Preflight checks"
-if (-not (Test-Command git)) { Fail "Git was not found in PATH. Install Git for Windows and run this script again." }
-Resolve-GithubProxy
-
+Write-Step "Testing GitHub API connection"
 try {
-  $user = Invoke-GitHubJson "GET" "https://api.github.com/user" $token
-  Write-Ok "Authenticated as: $($user.login)"
-}
-catch {
-  Fail "GitHub authentication failed. Create a new token with repo/public_repo permission and set it with: `$env:GITHUB_TOKEN='TOKEN'`nDetails: $($_.Exception.Message)"
+  $me = Invoke-GitHubJson "GET" "https://api.github.com/user" $token
+  Write-Host "GitHub auth OK: $($me.login)" -ForegroundColor Green
+} catch {
+  Write-Host "GitHub API connection failed." -ForegroundColor Red
+  Write-Host $_.Exception.Message -ForegroundColor Red
+  Write-Host ""
+  Write-Host "Fix: run deploy_release_v1_0_1_with_proxy.bat and enter your local proxy." -ForegroundColor Yellow
+  Write-Host "Common ports: http://127.0.0.1:7890  or  http://127.0.0.1:10809" -ForegroundColor Yellow
+  throw
 }
 
-if (-not $NoBuild) {
+if (-not $SkipBuild) {
   Write-Step "Building Windows executable"
   & .\build_exe.bat
-  if ($LASTEXITCODE -ne 0) { Fail "build_exe.bat failed." }
+  if ($LASTEXITCODE -ne 0) { throw "build_exe.bat failed." }
 } else {
-  Write-Warn "Skipping build because -NoBuild was used."
+  Write-Step "Skipping build because -SkipBuild was passed"
 }
 
-if (-not (Test-Path "dist\DicodeConfigChecker.exe")) { Fail "dist\DicodeConfigChecker.exe was not found." }
+$exeAsset = "release\DicodeConfigChecker-v$Version-windows.exe"
+if (-not (Test-Path $exeAsset)) { throw "$exeAsset was not found. Run deploy_release_v1_0_1_with_proxy.bat once without -SkipBuild." }
+
+if (-not (Test-Command git)) { throw "Git was not found in PATH." }
 
 Write-Step "Creating repository if needed"
 $repo = $null
@@ -215,145 +161,117 @@ try {
     auto_init = $false
   }
   $Owner = $repo.owner.login
-  Write-Ok "Created repository: $($repo.html_url)"
+  Write-Host "Created repository: $($repo.html_url)" -ForegroundColor Green
+} catch {
+  Write-Host "Repository may already exist. Trying to use $Owner/$RepoName ..." -ForegroundColor Yellow
+  $repo = Invoke-GitHubJson "GET" "https://api.github.com/repos/$Owner/$RepoName" $token
 }
-catch {
-  Write-Warn "Repository may already exist. Trying $Owner/$RepoName ..."
-  try {
-    $repo = Invoke-GitHubJson "GET" "https://api.github.com/repos/$Owner/$RepoName" $token
-    Write-Ok "Using repository: $($repo.html_url)"
-  }
-  catch { Fail "Could not create or load repository $Owner/$RepoName. Details: $($_.Exception.Message)" }
-}
+
+Remove-ReleaseAndTag $Owner $RepoName $PreviousTag $token
+Remove-ReleaseAndTag $Owner $RepoName $Tag $token
 
 Write-Step "Preparing local git repository"
-if (-not (Test-Path ".git")) { Run-Git @("init") }
-Run-Git @("config", "user.name", "Dicode Release")
-Run-Git @("config", "user.email", "release@dicode.local")
+if (-not (Test-Path ".git")) { git init | Out-Host }
 
-if (Test-Path ".gitignore") {
-  $gitignore = Get-Content ".gitignore" -Raw
-  foreach ($item in @(".env", "core/xray.exe", "dist/", "build/", "release/")) {
-    $escaped = [regex]::Escape($item)
-    if ($gitignore -notmatch "(?m)^$escaped$") { Add-Content ".gitignore" $item }
-  }
+git config user.name "Dicode Release"
+git config user.email "release@dicode.local"
+git add .
+$hasChanges = git status --porcelain
+if ($hasChanges) {
+  git commit -m "Release $Version" | Out-Host
+} else {
+  Write-Host "No source changes to commit." -ForegroundColor Yellow
 }
 
-Run-Git @("add", ".")
-$hasChanges = (& git status --porcelain)
-if ($hasChanges) { Run-Git @("commit", "-m", "Release 1.0.0") }
-else { Write-Warn "No source changes to commit." }
-
-Run-Git @("branch", "-M", "main")
+git branch -M main
 $remoteUrl = "https://github.com/$Owner/$RepoName.git"
-$remoteList = (& git remote)
-if ($remoteList -contains "origin") { Run-Git @("remote", "set-url", "origin", $remoteUrl) }
-else { Run-Git @("remote", "add", "origin", $remoteUrl) }
+$remotes = git remote
+if ($remotes -contains "origin") { git remote set-url origin $remoteUrl } else { git remote add origin $remoteUrl }
 
 Write-Step "Pushing source code"
-Run-GitAuth $token @("push", "-u", "origin", "main")
+Invoke-GitCommand -Arguments @("-c", "http.extraHeader=Authorization: Bearer $token", "push", "-u", "origin", "main", "--force")
 
-Write-Step "Creating and pushing tag"
-Run-Git @("tag", "-f", "-a", $Tag, "-m", "Dicode Config Checker 1.0.0")
-Run-GitAuth $token @("push", "origin", $Tag, "--force")
+Write-Step "Creating local tag"
+git tag -d $Tag 2>$null | Out-Null
+git tag -a $Tag -m "Dicode Config Checker $Version"
+Invoke-GitCommand -Arguments @("-c", "http.extraHeader=Authorization: Bearer $token", "push", "origin", $Tag, "--force")
 
 Write-Step "Creating source archive"
 New-Item -ItemType Directory -Force -Path release | Out-Null
-$sourceZip = "release\DicodeConfigChecker-source-v1.0.0.zip"
+$sourceZip = "release\DicodeConfigChecker-source-v$Version.zip"
 if (Test-Path $sourceZip) { Remove-Item $sourceZip -Force }
-$exclude = @(".git", "build", "dist", "release", "__pycache__", ".env")
+$exclude = @(".git", "build", "dist", "release", "__pycache__", ".pytest_cache")
 $files = Get-ChildItem -Force | Where-Object { $exclude -notcontains $_.Name }
 Compress-Archive -Path $files.FullName -DestinationPath $sourceZip -Force
 
-$releaseBody = @"
-# Dicode Config Checker v1.0.0
+Write-Step "Creating GitHub release $Tag"
+$body = @"
+# Dicode Config Checker $Tag
 
 ## فارسی
-یک ابزار دسکتاپ ویندوزی برای جمع‌آوری کانفیگ از کانال‌های عمومی تلگرام، تست واقعی‌تر با Xray-core و ساخت خروجی‌های sub.txt و proxy.txt.
+- لیست کامل جدید کانال‌های رتبه دوم جایگزین شد.
+- خروجی‌ها از تنظیمات جدا شدند: ساخت sub.txt برای کانفیگ‌ها و ساخت proxy.txt برای پروکسی‌ها مستقل است.
+- حالت فقط پروکسی: گزینه «بررسی کانفیگ‌های V2Ray/Xray» را خاموش و «بررسی پروکسی‌های تلگرام» را روشن بگذار.
+- نسخه قبلی v1.0.0 و تگ آن قبل از انتشار نسخه جدید حذف می‌شود.
+- اسکریپت دیپلوی اکنون حالت پروکسی دارد تا خطای DNS/فیلترینگ api.github.com را رد کند.
 
 ## English
-A Windows desktop tool for collecting public Telegram config candidates, checking them with Xray-core based quality testing, and generating sub.txt / proxy.txt outputs.
+- Updated Rank 2 channel list.
+- Added independent output toggles for V2Ray/Xray configs and Telegram proxies.
+- Added proxy-only mode.
+- Deletes old v1.0.0 release/tag before publishing v1.0.1.
+- Deployment script now supports proxy mode for api.github.com connectivity problems.
 
-### Included
-- DicodeConfigChecker.exe
-- Source code archive
+### Assets
+- DicodeConfigChecker-v$Version-windows.exe
+- DicodeConfigChecker-source-v$Version.zip
 "@
 
-Write-Step "Creating or updating GitHub release"
-$release = $null
-try {
-  $release = Invoke-GitHubJson "GET" "https://api.github.com/repos/$Owner/$RepoName/releases/tags/$Tag" $token
-  Write-Warn "Release already exists. It will be updated."
-  $release = Invoke-GitHubJson "PATCH" "https://api.github.com/repos/$Owner/$RepoName/releases/$($release.id)" $token @{
-    name = "Dicode Config Checker v1.0.0"
-    body = $releaseBody
-    draft = $false
-    prerelease = $false
-  }
-}
-catch {
-  $release = Invoke-GitHubJson "POST" "https://api.github.com/repos/$Owner/$RepoName/releases" $token @{
-    tag_name = $Tag
-    target_commitish = "main"
-    name = "Dicode Config Checker v1.0.0"
-    body = $releaseBody
-    draft = $false
-    prerelease = $false
-  }
+$release = Invoke-GitHubJson "POST" "https://api.github.com/repos/$Owner/$RepoName/releases" $token @{
+  tag_name = $Tag
+  target_commitish = "main"
+  name = "Dicode Config Checker $Tag"
+  body = $body
+  draft = $false
+  prerelease = $false
 }
 
-function Remove-ExistingAsset($AssetName) {
-  $assets = Invoke-GitHubJson "GET" "https://api.github.com/repos/$Owner/$RepoName/releases/$($release.id)/assets" $token
-  foreach ($asset in $assets) {
-    if ($asset.name -eq $AssetName) {
-      Invoke-GitHubJson "DELETE" "https://api.github.com/repos/$Owner/$RepoName/releases/assets/$($asset.id)" $token | Out-Null
-      Write-Warn "Removed old asset: $AssetName"
+function Upload-Asset($Path, $Name, $ContentType) {
+  $uploadBase = $release.upload_url -replace "\{\?name,label\}", ""
+  $uri = "$uploadBase?name=$([uri]::EscapeDataString($Name))"
+  $headers = @{
+    "Authorization" = "Bearer $token"
+    "Accept" = "application/vnd.github+json"
+    "X-GitHub-Api-Version" = "2022-11-28"
+    "User-Agent" = "DicodeConfigCheckerReleaseScript"
+  }
+  $params = @{
+    Method = "POST"
+    Uri = $uri
+    Headers = $headers
+    ContentType = $ContentType
+    InFile = $Path
+    ErrorAction = "Stop"
+  }
+  if ($script:RestProxy) {
+    $params.Proxy = $script:RestProxy
+  }
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+      Invoke-RestMethod @params | Out-Null
+      Write-Host "Uploaded: $Name" -ForegroundColor Green
+      return
+    } catch {
+      if ($attempt -ge 3) { throw }
+      Start-Sleep -Seconds (2 * $attempt)
     }
   }
 }
 
-function Get-ReleaseUploadBase {
-  if (-not $release -or -not $release.upload_url) {
-    Write-Warn "Release upload_url is missing. Re-loading release by tag..."
-    $script:release = Invoke-GitHubJson "GET" "https://api.github.com/repos/$Owner/$RepoName/releases/tags/$Tag" $token
-  }
-
-  $rawUploadUrl = [string]$script:release.upload_url
-  if (-not $rawUploadUrl -or $rawUploadUrl.Trim().Length -eq 0) {
-    Fail "GitHub release upload_url is empty. Release could not be used for asset upload."
-  }
-
-  # GitHub returns a URI template like:
-  # https://uploads.github.com/repos/OWNER/REPO/releases/ID/assets{?name,label}
-  # Invoke-RestMethod needs a real URI, so remove the template part first.
-  $uploadBase = $rawUploadUrl -replace "\{.*\}$", ""
-
-  if ($uploadBase -notmatch "^https://") {
-    Fail "Invalid GitHub asset upload URL: $rawUploadUrl"
-  }
-
-  return $uploadBase
-}
-
-function Upload-Asset($Path, $Name, $ContentType) {
-  if (-not (Test-Path $Path)) { Fail "Asset not found: $Path" }
-  Remove-ExistingAsset $Name
-
-  $uploadBase = Get-ReleaseUploadBase
-  $encodedName = [uri]::EscapeDataString($Name)
-  $uri = ("{0}?name={1}" -f $uploadBase, $encodedName)
-
-  Write-Warn "Upload URL: $uri"
-  Invoke-GitHubRaw "POST" $uri $token $ContentType $Path | Out-Null
-  Write-Ok "Uploaded: $Name"
-}
-
-$script:release = $release
-
 Write-Step "Uploading release assets"
-Upload-Asset "dist\DicodeConfigChecker.exe" "DicodeConfigChecker-v1.0.0-windows.exe" "application/octet-stream"
-Upload-Asset $sourceZip "DicodeConfigChecker-source-v1.0.0.zip" "application/zip"
+Upload-Asset $exeAsset "DicodeConfigChecker-v$Version-windows.exe" "application/octet-stream"
+Upload-Asset $sourceZip "DicodeConfigChecker-source-v$Version.zip" "application/zip"
 
 Write-Step "Done"
-Write-Ok "Repository: https://github.com/$Owner/$RepoName"
-Write-Ok "Release:    https://github.com/$Owner/$RepoName/releases/tag/$Tag"
+Write-Host "Repository: https://github.com/$Owner/$RepoName" -ForegroundColor Green
+Write-Host "Release:    https://github.com/$Owner/$RepoName/releases/tag/$Tag" -ForegroundColor Green
