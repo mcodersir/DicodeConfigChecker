@@ -52,34 +52,119 @@ function Convert-ToBasicAuthHeader([string]$Token) {
   return "Authorization: Basic $encoded"
 }
 
+function Normalize-ProxyUrl([string]$ProxyUrl) {
+  if (-not $ProxyUrl) { return "" }
+  $p = $ProxyUrl.Trim()
+  if (-not $p) { return "" }
+  if ($p -notmatch '^(http|https|socks5|socks5h)://') { $p = "http://$p" }
+  return $p
+}
+
 function Get-GitPrefix([string]$Token, [string]$ProxyUrl) {
   $authHeader = Convert-ToBasicAuthHeader $Token
   $prefix = @("-c", "credential.helper=", "-c", "http.extraHeader=$authHeader")
-  if ($ProxyUrl -and $ProxyUrl.Trim().Length -gt 0) {
-    $p = $ProxyUrl.Trim()
+  $p = Normalize-ProxyUrl $ProxyUrl
+  if ($p) {
     # http.proxy is used by Git/libcurl for HTTPS remotes too. socks5h:// makes DNS resolve through the proxy.
     $prefix += @("-c", "http.proxy=$p", "-c", "https.proxy=$p")
-    $env:HTTP_PROXY = $p
-    $env:HTTPS_PROXY = $p
-    $env:ALL_PROXY = $p
-    $env:http_proxy = $p
-    $env:https_proxy = $p
-    $env:all_proxy = $p
   }
   return $prefix
 }
 
-function Run-GitAuth([string[]]$Arguments, [string]$Token, [string]$ProxyUrl) {
-  $prefix = Get-GitPrefix $Token $ProxyUrl
+function Invoke-GitAuthRaw([string[]]$Arguments, [string]$Token, [string]$ProxyUrl) {
+  $proxy = Normalize-ProxyUrl $ProxyUrl
+  $envNames = @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy','GIT_TERMINAL_PROMPT')
+  $oldEnv = @{}
+  foreach ($name in $envNames) {
+    $oldEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+  }
+  try {
+    $env:GIT_TERMINAL_PROMPT = "0"
+    if ($proxy) {
+      $env:HTTP_PROXY = $proxy
+      $env:HTTPS_PROXY = $proxy
+      $env:ALL_PROXY = $proxy
+      $env:http_proxy = $proxy
+      $env:https_proxy = $proxy
+      $env:all_proxy = $proxy
+    }
+    $prefix = Get-GitPrefix $Token $proxy
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      & git @prefix @Arguments
+      $code = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $oldErrorActionPreference
+    }
+    return $code
+  } finally {
+    foreach ($name in $envNames) {
+      [Environment]::SetEnvironmentVariable($name, $oldEnv[$name], 'Process')
+    }
+  }
+}
+
+function Get-ProxyCandidates([string]$PreferredProxy) {
+  $raw = New-Object System.Collections.Generic.List[string]
+  $p = Normalize-ProxyUrl $PreferredProxy
+  if ($p) { $raw.Add($p) }
+
+  foreach ($envName in @('HTTPS_PROXY','HTTP_PROXY','ALL_PROXY','https_proxy','http_proxy','all_proxy')) {
+    $val = [Environment]::GetEnvironmentVariable($envName)
+    $norm = Normalize-ProxyUrl $val
+    if ($norm) { $raw.Add($norm) }
+  }
+
   $oldErrorActionPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    & git @prefix @Arguments
-    $code = $LASTEXITCODE
-  } finally {
-    $ErrorActionPreference = $oldErrorActionPreference
+    $gitProxy = (& git config --get http.proxy 2>$null)
+    if ($LASTEXITCODE -eq 0) {
+      $norm = Normalize-ProxyUrl $gitProxy
+      if ($norm) { $raw.Add($norm) }
+    }
+  } finally { $ErrorActionPreference = $oldErrorActionPreference }
+
+  # Direct is tried too, but proxies are retried automatically if direct DNS fails.
+  $raw.Add("")
+  foreach ($common in @(
+    'socks5h://127.0.0.1:10808',
+    'http://127.0.0.1:10809',
+    'http://127.0.0.1:7890',
+    'socks5h://127.0.0.1:7891',
+    'socks5h://127.0.0.1:1080',
+    'http://127.0.0.1:8080'
+  )) { $raw.Add($common) }
+
+  $seen = @{}
+  $out = New-Object System.Collections.Generic.List[string]
+  foreach ($item in $raw) {
+    $key = if ($item) { $item.ToLowerInvariant() } else { '<direct>' }
+    if (-not $seen.ContainsKey($key)) {
+      $seen[$key] = $true
+      $out.Add($item)
+    }
   }
-  if ($code -ne 0) { throw "git command failed: git $($Arguments -join ' ')" }
+  return $out.ToArray()
+}
+
+function Run-GitAuthWithFallback([string[]]$Arguments, [string]$Token, [string]$PreferredProxy, [string]$Label) {
+  $candidates = Get-ProxyCandidates $PreferredProxy
+  $lastProxy = ""
+  foreach ($candidate in $candidates) {
+    $lastProxy = $candidate
+    if ($candidate) { Write-Host "Trying $Label via $candidate" -ForegroundColor DarkCyan }
+    else { Write-Host "Trying $Label direct" -ForegroundColor DarkCyan }
+    $code = Invoke-GitAuthRaw $Arguments $Token $candidate
+    if ($code -eq 0) {
+      if ($candidate) { Write-Ok "Git succeeded via proxy: $candidate" }
+      else { Write-Ok "Git succeeded direct." }
+      return $candidate
+    }
+  }
+  if ($lastProxy) { throw "git command failed after proxy retries: git $($Arguments -join ' ')" }
+  throw "git command failed: git $($Arguments -join ' ')"
 }
 
 function Test-GitHubNameResolution {
@@ -119,17 +204,14 @@ if (-not (Test-Path ".github\workflows\release-windows.yml")) {
   throw "GitHub Actions workflow is missing: .github\workflows\release-windows.yml"
 }
 
-$GitProxy = $GitProxy.Trim()
-if ($GitProxy -and $GitProxy -notmatch '^(http|https|socks5|socks5h)://') {
-  Write-Warn "Proxy value has no scheme. Assuming http://"
-  $GitProxy = "http://$GitProxy"
-}
-if ($GitProxy) { Write-Ok "Git push proxy enabled: $GitProxy" }
+$GitProxy = Normalize-ProxyUrl $GitProxy
+if ($GitProxy) { Write-Ok "Preferred Git push proxy: $GitProxy" }
 else {
   if (-not (Test-GitHubNameResolution)) {
     Write-Warn "Windows cannot resolve github.com directly right now."
-    Write-Warn "This push will probably fail unless Git has a working global proxy."
-    Write-Warn "Rerun and enter a proxy like socks5h://127.0.0.1:10808 or http://127.0.0.1:10809."
+    Write-Warn "No problem: this script will automatically retry common local Git proxies."
+  } else {
+    Write-Warn "No proxy entered. Direct Git will be tried first, then common local proxies if needed."
   }
 }
 
@@ -161,26 +243,12 @@ $remotes = git remote
 if ($remotes -contains "origin") { Run-Git @("remote", "set-url", "origin", $RemoteUrl) }
 else { Run-Git @("remote", "add", "origin", $RemoteUrl) }
 
-Write-Step "Testing GitHub remote with Git"
-try {
-  Run-GitAuth @("ls-remote", "--heads", "origin") $token $GitProxy
-} catch {
-  Show-PushHelp $RepoName $GitProxy
-  throw
-}
-
-Write-Step "Pushing source to GitHub"
-try {
-  Run-GitAuth @("push", "-u", "origin", "main", "--force") $token $GitProxy
-} catch {
-  Show-PushHelp $RepoName $GitProxy
-  throw
-}
-
-Write-Step "Pushing release tag $Tag"
+Write-Step "Creating local release tag $Tag"
 Run-Git @("tag", "-f", "-a", $Tag, "-m", "Dicode Config Checker $Tag")
+
+Write-Step "Pushing source and release tag to GitHub in one Git connection"
 try {
-  Run-GitAuth @("push", "origin", "refs/tags/$Tag", "--force") $token $GitProxy
+  $usedProxy = Run-GitAuthWithFallback -Arguments @("push", "-u", "origin", "main", "refs/tags/$Tag", "--force") -Token $token -PreferredProxy $GitProxy -Label "combined branch+tag push"
 } catch {
   Show-PushHelp $RepoName $GitProxy
   throw

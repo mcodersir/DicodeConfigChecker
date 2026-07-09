@@ -105,3 +105,13 @@ If you previously set a broken global Git proxy, run:
 ```bat
 clear_bad_git_proxy.bat
 ```
+
+
+## Branch + tag push fix
+The deploy script now creates the local tag before pushing and sends `main` plus `refs/tags/v1.0.1` in one `git push` command. This avoids the old case where the source push succeeded but the second tag push failed because Windows DNS broke between two separate Git connections. It also auto-retries direct mode and common local proxies.
+
+If `main` is already pushed and only the tag failed, run:
+
+```bat
+push_release_tag_v1_0_1_only.bat
+```
