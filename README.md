@@ -171,3 +171,8 @@ If `main` is already pushed and only the tag failed, run:
 ```bat
 push_release_tag_v1_0_1_only.bat
 ```
+
+
+## No-proxy push fix
+
+The deploy scripts are now direct-by-default. Leaving the proxy prompt empty means no proxy is used, and the script no longer auto-tries common proxy ports after a direct push. `main` and `refs/tags/v1.0.1` are pushed in one Git command.

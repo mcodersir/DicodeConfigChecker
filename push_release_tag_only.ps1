@@ -48,13 +48,9 @@ function Invoke-GitAuthRaw([string[]]$Arguments, [string]$Token, [string]$ProxyU
   }
 }
 function Candidates([string]$Preferred) {
-  $items = @()
-  $p=Normalize-ProxyUrl $Preferred; if ($p) { $items += $p }
-  $items += ""
-  $items += @('socks5h://127.0.0.1:10808','http://127.0.0.1:10809','http://127.0.0.1:7890','socks5h://127.0.0.1:7891','socks5h://127.0.0.1:1080','http://127.0.0.1:8080')
-  $seen=@{}; $out=@()
-  foreach($i in $items){ $key=if($i){$i.ToLowerInvariant()}else{'<direct>'}; if(-not $seen[$key]){$seen[$key]=$true; $out+=$i} }
-  return $out
+  $p = Normalize-ProxyUrl $Preferred
+  if ($p) { return @($p) }
+  return @('')
 }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "Git was not found in PATH." }
 $token = Get-Token
@@ -63,8 +59,8 @@ if (-not (Test-Path ".git")) { throw "No .git folder found. Run deploy_via_githu
 & git tag -f -a $Tag -m "Dicode Config Checker $Tag"
 Write-Step "Pushing only release tag $Tag"
 foreach($proxy in (Candidates $GitProxy)) {
-  if($proxy){ Write-Host "Trying tag push via $proxy" -ForegroundColor DarkCyan } else { Write-Host "Trying tag push direct" -ForegroundColor DarkCyan }
+  if($proxy){ Write-Host "Trying tag push via $proxy" -ForegroundColor DarkCyan } else { Write-Host "Trying tag push direct, without proxy" -ForegroundColor DarkCyan }
   $code = Invoke-GitAuthRaw @("push", "origin", "refs/tags/$Tag", "--force") $token $proxy
   if($code -eq 0){ Write-Ok "Tag pushed. Release workflow should start."; Write-Host "https://github.com/$Owner/$RepoName/actions" -ForegroundColor Green; exit 0 }
 }
-throw "Tag push failed after direct/proxy retries."
+throw "Tag push failed without proxy. If DNS fails, fix VPN/TUN/DNS or explicitly enter a proxy."

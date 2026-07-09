@@ -106,65 +106,28 @@ function Invoke-GitAuthRaw([string[]]$Arguments, [string]$Token, [string]$ProxyU
 }
 
 function Get-ProxyCandidates([string]$PreferredProxy) {
-  $raw = New-Object System.Collections.Generic.List[string]
+  # Direct-only by default. No automatic proxy retries.
+  # If the user explicitly enters a proxy, only that proxy is used.
   $p = Normalize-ProxyUrl $PreferredProxy
-  if ($p) { $raw.Add($p) }
-
-  foreach ($envName in @('HTTPS_PROXY','HTTP_PROXY','ALL_PROXY','https_proxy','http_proxy','all_proxy')) {
-    $val = [Environment]::GetEnvironmentVariable($envName)
-    $norm = Normalize-ProxyUrl $val
-    if ($norm) { $raw.Add($norm) }
-  }
-
-  $oldErrorActionPreference = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    $gitProxy = (& git config --get http.proxy 2>$null)
-    if ($LASTEXITCODE -eq 0) {
-      $norm = Normalize-ProxyUrl $gitProxy
-      if ($norm) { $raw.Add($norm) }
-    }
-  } finally { $ErrorActionPreference = $oldErrorActionPreference }
-
-  # Direct is tried too, but proxies are retried automatically if direct DNS fails.
-  $raw.Add("")
-  foreach ($common in @(
-    'socks5h://127.0.0.1:10808',
-    'http://127.0.0.1:10809',
-    'http://127.0.0.1:7890',
-    'socks5h://127.0.0.1:7891',
-    'socks5h://127.0.0.1:1080',
-    'http://127.0.0.1:8080'
-  )) { $raw.Add($common) }
-
-  $seen = @{}
-  $out = New-Object System.Collections.Generic.List[string]
-  foreach ($item in $raw) {
-    $key = if ($item) { $item.ToLowerInvariant() } else { '<direct>' }
-    if (-not $seen.ContainsKey($key)) {
-      $seen[$key] = $true
-      $out.Add($item)
-    }
-  }
-  return $out.ToArray()
+  if ($p) { return @($p) }
+  return @("")
 }
 
 function Run-GitAuthWithFallback([string[]]$Arguments, [string]$Token, [string]$PreferredProxy, [string]$Label) {
   $candidates = Get-ProxyCandidates $PreferredProxy
-  $lastProxy = ""
   foreach ($candidate in $candidates) {
-    $lastProxy = $candidate
-    if ($candidate) { Write-Host "Trying $Label via $candidate" -ForegroundColor DarkCyan }
-    else { Write-Host "Trying $Label direct" -ForegroundColor DarkCyan }
+    if ($candidate) { Write-Host "Running $Label via explicit proxy: $candidate" -ForegroundColor DarkCyan }
+    else { Write-Host "Running $Label direct, without proxy" -ForegroundColor DarkCyan }
+
     $code = Invoke-GitAuthRaw $Arguments $Token $candidate
     if ($code -eq 0) {
-      if ($candidate) { Write-Ok "Git succeeded via proxy: $candidate" }
-      else { Write-Ok "Git succeeded direct." }
-      return $candidate
+      if ($candidate) { Write-Ok "Git push succeeded via explicit proxy: $candidate" }
+      else { Write-Ok "Git push succeeded direct. No proxy was used." }
+      return "ok"
     }
   }
-  if ($lastProxy) { throw "git command failed after proxy retries: git $($Arguments -join ' ')" }
-  throw "git command failed: git $($Arguments -join ' ')"
+  if ($PreferredProxy) { throw "git command failed with explicit proxy: git $($Arguments -join ' ')" }
+  throw "git command failed without proxy: git $($Arguments -join ' ')"
 }
 
 function Test-GitHubNameResolution {
@@ -184,12 +147,12 @@ function Show-PushHelp([string]$RepoName, [string]$ProxyUrl) {
   Write-Host ""
   Write-Warn "Push failed. Read the exact error above."
   Write-Warn "If it says 'Could not resolve host: github.com', Git cannot resolve DNS on this PC."
-  Write-Warn "Run this BAT again and enter a proxy for Git push. Common values:"
+  Write-Warn "This script did not auto-use proxy. If direct DNS fails, either fix VPN/TUN/DNS or rerun and explicitly enter a proxy:"
   Write-Host "  http://127.0.0.1:10809" -ForegroundColor Cyan
   Write-Host "  http://127.0.0.1:7890" -ForegroundColor Cyan
   Write-Host "  socks5h://127.0.0.1:10808" -ForegroundColor Cyan
   Write-Host "  socks5h://127.0.0.1:7891" -ForegroundColor Cyan
-  Write-Warn "Use socks5h://, not socks5://, when you want DNS to resolve through the proxy."
+  Write-Warn "Use socks5h://, not socks5://, only if you explicitly decide to use a SOCKS proxy."
   Write-Warn "Other common reasons: repository does not exist, token is wrong/expired, or token lacks repo + workflow scopes."
   Write-Warn "Create this public repo in browser if it does not exist:"
   Write-Host "https://github.com/new?name=$RepoName&visibility=public" -ForegroundColor Cyan
@@ -205,13 +168,15 @@ if (-not (Test-Path ".github\workflows\release-windows.yml")) {
 }
 
 $GitProxy = Normalize-ProxyUrl $GitProxy
-if ($GitProxy) { Write-Ok "Preferred Git push proxy: $GitProxy" }
-else {
+if ($GitProxy) {
+  Write-Ok "Explicit Git push proxy: $GitProxy"
+} else {
   if (-not (Test-GitHubNameResolution)) {
     Write-Warn "Windows cannot resolve github.com directly right now."
-    Write-Warn "No problem: this script will automatically retry common local Git proxies."
+    Write-Warn "You chose no proxy, so this script will still try direct Git only."
+    Write-Warn "If direct push fails, fix DNS/VPN/TUN mode and run it again."
   } else {
-    Write-Warn "No proxy entered. Direct Git will be tried first, then common local proxies if needed."
+    Write-Ok "No proxy entered. Git push will run direct only."
   }
 }
 
