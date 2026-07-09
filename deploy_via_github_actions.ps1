@@ -22,8 +22,28 @@ function Get-Token {
 }
 
 function Run-Git([string[]]$Arguments) {
-  & git @Arguments
-  if ($LASTEXITCODE -ne 0) { throw "git command failed: git $($Arguments -join ' ')" }
+  # Native tools like git can write harmless messages to stderr.
+  # Do not let PowerShell stop on stderr; fail only on the process exit code.
+  $oldErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & git @Arguments
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $oldErrorActionPreference
+  }
+  if ($code -ne 0) { throw "git command failed: git $($Arguments -join ' ')" }
+}
+
+function Try-Git([string[]]$Arguments) {
+  $oldErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & git @Arguments
+    return $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $oldErrorActionPreference
+  }
 }
 
 function Convert-ToBasicAuthHeader([string]$Token) {
@@ -38,8 +58,15 @@ function Convert-ToBasicAuthHeader([string]$Token) {
 function Run-GitAuth([string[]]$Arguments, [string]$Token) {
   $authHeader = Convert-ToBasicAuthHeader $Token
   # Disable cached credential helpers for this command so old/wrong Windows credentials cannot override the token.
-  & git -c credential.helper= -c "http.extraHeader=$authHeader" @Arguments
-  if ($LASTEXITCODE -ne 0) { throw "git command failed: git $($Arguments -join ' ')" }
+  $oldErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & git -c credential.helper= -c "http.extraHeader=$authHeader" @Arguments
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $oldErrorActionPreference
+  }
+  if ($code -ne 0) { throw "git command failed: git $($Arguments -join ' ')" }
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -62,8 +89,10 @@ Write-Step "Preparing local repository"
 if (-not (Test-Path ".git")) { Run-Git @("init") }
 Run-Git @("config", "user.name", "Dicode Release")
 Run-Git @("config", "user.email", "release@dicode.local")
+Run-Git @("config", "core.autocrlf", "false")
+Run-Git @("config", "core.safecrlf", "false")
 # Never commit local secrets. The package may contain .env for local testing; keep it out of git.
-git rm --cached --ignore-unmatch .env .env.local 2>$null | Out-Null
+Try-Git @("rm", "--cached", "--ignore-unmatch", ".env", ".env.local") | Out-Null
 Run-Git @("add", ".")
 $hasChanges = git status --porcelain
 if ($hasChanges) {
@@ -92,9 +121,10 @@ try {
 }
 
 Write-Step "Pushing release tag $Tag"
-git tag -d $Tag 2>$null | Out-Null
-Run-Git @("tag", "-a", $Tag, "-m", "Dicode Config Checker $Tag")
-Run-GitAuth @("push", "origin", $Tag, "--force") $token
+# Create or replace the local tag. Do not delete first; deleting a missing tag exits non-zero and can stop PowerShell.
+Run-Git @("tag", "-f", "-a", $Tag, "-m", "Dicode Config Checker $Tag")
+# Push the exact tag ref with --force so rerunning the deploy is safe.
+Run-GitAuth @("push", "origin", "refs/tags/$Tag", "--force") $token
 
 Write-Step "Done"
 Write-Ok "GitHub Actions will now build the Windows EXE and create the release on GitHub."

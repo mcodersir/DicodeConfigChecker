@@ -29,3 +29,20 @@ deploy_via_github_actions_v1_0_1.bat
 ```
 
 Do not run the old proxy deploy unless you specifically want local REST release creation.
+
+## v1.0.1 tag fix
+
+If the source push succeeds but the deploy stops at:
+
+```text
+error: tag 'v1.0.1' not found.
+```
+
+use this fixed package. The deploy script no longer deletes the local tag first. It creates or replaces it with:
+
+```text
+git tag -f -a v1.0.1 -m "Dicode Config Checker v1.0.1"
+git push origin refs/tags/v1.0.1 --force
+```
+
+This makes rerunning the release safe even when the local tag does not exist yet.

@@ -134,3 +134,14 @@ diagnose_proxy_ports.bat
 deploy_via_github_actions_v1_0_1.bat
 ```
 
+
+
+### Tag push fix
+
+If the deploy stops at `error: tag 'v1.0.1' not found`, use this package and run:
+
+```bat
+deploy_via_github_actions_v1_0_1.bat
+```
+
+The script now creates or replaces the tag safely with `git tag -f -a` and pushes `refs/tags/v1.0.1 --force`.
