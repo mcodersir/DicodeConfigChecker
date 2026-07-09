@@ -15,7 +15,7 @@ function Write-Ok($Text) { Write-Host $Text -ForegroundColor Green }
 function Get-Token {
   if ($env:GITHUB_TOKEN -and $env:GITHUB_TOKEN.Trim().Length -gt 0) { return $env:GITHUB_TOKEN.Trim() }
   if ($env:GH_TOKEN -and $env:GH_TOKEN.Trim().Length -gt 0) { return $env:GH_TOKEN.Trim() }
-  $secure = Read-Host "Paste GitHub token with repo scope (input is hidden)" -AsSecureString
+  $secure = Read-Host "Paste GitHub token with repo + workflow scope (input is hidden)" -AsSecureString
   $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
@@ -26,8 +26,19 @@ function Run-Git([string[]]$Arguments) {
   if ($LASTEXITCODE -ne 0) { throw "git command failed: git $($Arguments -join ' ')" }
 }
 
+function Convert-ToBasicAuthHeader([string]$Token) {
+  # GitHub HTTPS git pushes expect the PAT as the password in Basic auth.
+  # We send it as an in-memory extraHeader, so it is not written to .git/config.
+  $pair = "x-access-token:$Token"
+  $bytes = [Text.Encoding]::ASCII.GetBytes($pair)
+  $encoded = [Convert]::ToBase64String($bytes)
+  return "Authorization: Basic $encoded"
+}
+
 function Run-GitAuth([string[]]$Arguments, [string]$Token) {
-  & git -c http.extraHeader="Authorization: Bearer $Token" @Arguments
+  $authHeader = Convert-ToBasicAuthHeader $Token
+  # Disable cached credential helpers for this command so old/wrong Windows credentials cannot override the token.
+  & git -c credential.helper= -c "http.extraHeader=$authHeader" @Arguments
   if ($LASTEXITCODE -ne 0) { throw "git command failed: git $($Arguments -join ' ')" }
 }
 
@@ -51,6 +62,8 @@ Write-Step "Preparing local repository"
 if (-not (Test-Path ".git")) { Run-Git @("init") }
 Run-Git @("config", "user.name", "Dicode Release")
 Run-Git @("config", "user.email", "release@dicode.local")
+# Never commit local secrets. The package may contain .env for local testing; keep it out of git.
+git rm --cached --ignore-unmatch .env .env.local 2>$null | Out-Null
 Run-Git @("add", ".")
 $hasChanges = git status --porcelain
 if ($hasChanges) {
@@ -69,7 +82,10 @@ try {
   Run-GitAuth @("push", "-u", "origin", "main", "--force") $token
 } catch {
   Write-Host ""
-  Write-Warn "Push failed. Most common reason: the repository does not exist yet or token has no repo access."
+  Write-Warn "Push failed. Most common reasons:"
+  Write-Warn "1) The repository does not exist yet."
+  Write-Warn "2) The token is wrong/expired, or it was generated for another account."
+  Write-Warn "3) The token lacks repo + workflow scopes. Workflow scope is required because this package pushes .github/workflows/release-windows.yml."
   Write-Warn "Create this public repo in browser, then run this script again:"
   Write-Host "https://github.com/new?name=$RepoName&visibility=public" -ForegroundColor Cyan
   throw

@@ -56,3 +56,15 @@ diagnose_proxy_ports.bat
 ```
 
 باز بودن پورت به معنی HTTP بودن آن نیست.
+
+## Fix added after `remote: invalid credentials`
+
+The Git push path has been changed from a Bearer auth header to Basic auth with username `x-access-token` and the pasted PAT as the password. The token is passed only through `http.extraHeader` for the current git command and is not saved in `.git/config`.
+
+The deploy script also uses `-c credential.helper=` during authenticated pushes. This prevents cached Git Credential Manager credentials from overriding the token and causing `remote: invalid credentials`.
+
+Required token permissions:
+
+- Classic PAT: `repo` + `workflow`
+- Fine-grained PAT: repository selected, `Contents: Read and write`, `Workflows: Read and write`
+

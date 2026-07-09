@@ -118,3 +118,19 @@ For proxy diagnostics:
 ```bat
 diagnose_proxy_ports.bat
 ```
+
+## رفع خطای `remote: invalid credentials`
+
+در نسخه فیکس‌شده، اسکریپت `deploy_via_github_actions.ps1` دیگر از `Bearer` برای `git push` استفاده نمی‌کند. توکن به شکل درستِ HTTPS Git یعنی Basic Auth در حافظه ارسال می‌شود و Credential Manager ویندوز برای همان دستور غیرفعال می‌شود تا اکانت/توکن قدیمی دخالت نکند.
+
+توکن کلاسیک GitHub باید این scopeها را داشته باشد:
+
+- `repo`
+- `workflow`
+
+بعد فقط این فایل را اجرا کن:
+
+```bat
+deploy_via_github_actions_v1_0_1.bat
+```
+
