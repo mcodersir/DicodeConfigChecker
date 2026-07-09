@@ -2,6 +2,8 @@ name: Build and Release Windows
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -14,6 +16,9 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: v1.0.1
+
 jobs:
   build-release:
     runs-on: windows-latest
@@ -23,14 +28,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Resolve version
         id: version
         shell: pwsh
         run: |
-          $tag = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.tag }}' } else { '${{ github.ref_name }}' }
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $tag = '${{ inputs.tag }}'
+          } elseif ('${{ github.ref_type }}' -eq 'tag') {
+            $tag = '${{ github.ref_name }}'
+          } else {
+            $tag = '${{ env.RELEASE_TAG }}'
+          }
+
           if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
           $version = $tag.TrimStart('v')
+
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Tag: $tag"
@@ -47,55 +61,75 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-build.txt
 
-      - name: Download and bundle Xray core
+      - name: Prepare optional Xray core
         shell: pwsh
         run: |
+          if (Test-Path "core\xray.exe") {
+            Write-Host "Bundled core\xray.exe already exists."
+            exit 0
+          }
+
+          Write-Host "Trying optional Xray download. Build will continue if it fails."
           python engine.py --download-xray-only
-          if (-not (Test-Path "core\xray.exe")) {
-            Write-Warning "core\xray.exe was not downloaded. Build continues without bundled Xray."
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Optional Xray download command returned exit code $LASTEXITCODE. Continuing without bundled Xray."
+          }
+
+          if (Test-Path "core\xray.exe") {
+            Write-Host "Xray core ready: core\xray.exe"
+          } else {
+            Write-Warning "core\xray.exe is missing. EXE will build without bundled Xray and can use/download Xray at runtime."
           }
 
       - name: Build Windows one-file EXE
         shell: pwsh
         run: |
-          $xrayArgs = @()
+          $args = @(
+            '-m', 'PyInstaller',
+            '--noconfirm',
+            '--clean',
+            '--onefile',
+            '--windowed',
+            '--name', 'DicodeConfigChecker',
+            '--icon', 'assets\app.ico',
+            '--add-data', 'assets;assets'
+          )
+
           if (Test-Path "core\xray.exe") {
-            $xrayArgs += @("--add-binary", "core\xray.exe;core")
+            $args += @('--add-binary', 'core\xray.exe;core')
           }
-          python -m PyInstaller --noconfirm --clean --onefile --windowed `
-            --name DicodeConfigChecker `
-            --icon "assets\app.ico" `
-            @xrayArgs `
-            --add-data "assets;assets" `
-            app.py
+
+          $args += @('app.py')
+          python @args
 
       - name: Prepare release assets
         shell: pwsh
         run: |
+          $version = '${{ steps.version.outputs.version }}'
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          Copy-Item "dist\DicodeConfigChecker.exe" "release\DicodeConfigChecker-v${{ steps.version.outputs.version }}-windows.exe" -Force
-          $exclude = @(".git", "build", "dist", "release", "__pycache__", ".pytest_cache")
-          $items = Get-ChildItem -Force | Where-Object { $exclude -notcontains $_.Name }
-          Compress-Archive -Path $items.FullName -DestinationPath "release\DicodeConfigChecker-source-v${{ steps.version.outputs.version }}.zip" -Force
-
-      - name: Remove old release artifacts
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete v1.0.0 --cleanup-tag --yes 2>$null
-          if ($LASTEXITCODE -ne 0) { Write-Host "No old v1.0.0 release to delete." }
-
-          gh release delete ${{ steps.version.outputs.tag }} --yes 2>$null
-          if ($LASTEXITCODE -ne 0) { Write-Host "No existing ${{ steps.version.outputs.tag }} release to delete." }
+          Copy-Item "dist\DicodeConfigChecker.exe" "release\DicodeConfigChecker-v$version-windows.exe" -Force
+          git archive --format=zip --output "release\DicodeConfigChecker-source-v$version.zip" HEAD
 
       - name: Create GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ steps.version.outputs.tag }}"
-          $version = "${{ steps.version.outputs.version }}"
+          $tag = '${{ steps.version.outputs.tag }}'
+          $version = '${{ steps.version.outputs.version }}'
+          $sha = '${{ github.sha }}'
+
+          gh release delete v1.0.0 --cleanup-tag --yes 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "No old v1.0.0 release/tag to delete." }
+
+          gh release delete $tag --cleanup-tag --yes 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "No existing $tag release/tag to delete." }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f $tag $sha
+          git push origin "refs/tags/$tag" --force
+
           $notes = @"
           # Dicode Config Checker $tag
 
@@ -104,15 +138,17 @@ jobs:
           - خروجی‌ها از تنظیمات جدا شدند: ساخت sub.txt برای کانفیگ‌ها و ساخت proxy.txt برای پروکسی‌ها مستقل است.
           - حالت فقط پروکسی اضافه شد: گزینه بررسی کانفیگ‌های V2Ray/Xray را خاموش و بررسی پروکسی‌های تلگرام را روشن بگذار.
           - نسخه قبلی v1.0.0 و تگ آن قبل از انتشار نسخه جدید حذف می‌شود.
-          - EXE ویندوزی روی GitHub Actions ساخته می‌شود، نه روی سیستم محلی.
+          - EXE ویندوزی روی GitHub Actions ساخته شده است.
 
           ## Assets
           - DicodeConfigChecker-v$version-windows.exe
           - DicodeConfigChecker-source-v$version.zip
           "@
           $notes | Set-Content -Encoding UTF8 release-notes-generated.md
+
           gh release create $tag `
             "release\DicodeConfigChecker-v$version-windows.exe" `
             "release\DicodeConfigChecker-source-v$version.zip" `
             --title "Dicode Config Checker $tag" `
-            --notes-file release-notes-generated.md
+            --notes-file release-notes-generated.md `
+            --target $sha
