@@ -1,178 +1,181 @@
-# Dicode Config Checker v1.0.1
+<p align="center">
+  <img src="assets/app.svg" width="96" alt="Dicode Config Checker">
+</p>
 
-ابزار دسکتاپ ویندوز برای جمع‌آوری کانفیگ از کانال‌های عمومی تلگرام، تست کیفیت با Xray-core یا TCP fallback و ساخت خروجی‌های جداگانه `sub.txt` و `proxy.txt`.
+<h1 align="center">Dicode Config Checker</h1>
 
-## تغییرات اصلی نسخه 1.0.1
+<p align="center">
+  ابزار ویندوزی برای جمع‌آوری، تفکیک و بررسی کانفیگ‌های عمومی و پروکسی‌های تلگرام
+</p>
 
-- لیست جدید کانال‌های رتبه دوم جایگزین شد: 202 کانال یکتا.
-- گزینه مستقل برای ساخت خروجی کانفیگ‌ها اضافه شد.
-- حالت فقط پروکسی اضافه شد.
-- اسکریپت build + deploy + release برای GitHub اضافه شد.
-- اسکریپت release نسخه قبلی `v1.0.0` و tag آن را قبل از انتشار `v1.0.1` حذف می‌کند.
+<p align="center">
+  <a href="https://github.com/mcodersir/DicodeConfigChecker/releases/latest"><img src="https://img.shields.io/github/v/release/mcodersir/DicodeConfigChecker?style=flat-square&label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square" alt="Windows">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/channels-242-2ea44f?style=flat-square" alt="242 channels">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/mcodersir/DicodeConfigChecker?style=flat-square" alt="License"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/mcodersir/DicodeConfigChecker/releases/latest"><strong>دانلود آخرین نسخه</strong></a>
+  ·
+  <a href="#مشارکت-در-فهرست-کانالها">پیشنهاد کانال</a>
+  ·
+  <a href="#ساخت-و-اجرا">ساخت از سورس</a>
+</p>
+
+---
+
+## درباره پروژه
+
+Dicode Config Checker فهرستی از کانال‌های عمومی تلگرام را بررسی می‌کند، لینک‌های کانفیگ و پروکسی را از پست‌های عمومی جمع‌آوری می‌کند و نتیجه را در خروجی‌های جداگانه تحویل می‌دهد.
+
+برنامه برای بررسی کانفیگ‌های سازگار، در صورت دسترسی از `Xray-core` استفاده می‌کند. در موارد دیگر، تست دسترسی شبکه و TCP به‌عنوان روش جایگزین اجرا می‌شود. نتیجه نهایی بر اساس وضعیت اتصال و تاخیر مرتب می‌شود تا خروجی قابل استفاده‌تری در اختیار داشته باشید.
+
+## امکانات
+
+| قابلیت | توضیح |
+|---|---|
+| جمع‌آوری از کانال‌های عمومی | خواندن پست‌های قابل مشاهده در Telegram Preview بدون نیاز به ورود به حساب |
+| فهرست داخلی کانال‌ها | شامل ۲۴۲ کانال عمومی قابل ویرایش از طریق `channels.txt` |
+| خروجی جداگانه | تفکیک کانفیگ‌های V2Ray/Xray از پروکسی‌های Telegram |
+| حالت فقط کانفیگ یا فقط پروکسی | هر بخش را می‌توان به‌صورت مستقل از تنظیمات فعال یا غیرفعال کرد |
+| بررسی چندمرحله‌ای | تست با Xray در حالت سازگار و استفاده از TCP fallback در سایر موارد |
+| مرتب‌سازی بر اساس تاخیر | چینش نتایج سالم بر اساس پینگ ثبت‌شده |
+| گزارش کامل | ساخت گزارش متنی و JSON برای بررسی دقیق‌تر نتایج |
+| رابط دسکتاپ | رابط گرافیکی فارسی برای اجرای مراحل جمع‌آوری و تست |
+
+## روش کار
+
+1. کانال‌های ثبت‌شده در `channels.txt` خوانده می‌شوند.
+2. لینک‌های پشتیبانی‌شده از صفحات عمومی تلگرام استخراج می‌شوند.
+3. موارد تکراری و نامعتبر حذف می‌شوند.
+4. کانفیگ‌ها و پروکسی‌ها با روش مناسب بررسی می‌شوند.
+5. خروجی‌های سالم و گزارش‌های تکمیلی در کنار برنامه ذخیره می‌شوند.
+
+> برای مرحله جمع‌آوری باید دسترسی شما به صفحات عمومی تلگرام برقرار باشد. نتیجه تست‌ها نیز به وضعیت شبکه، محدودیت‌های اپراتور و در دسترس بودن سرورها وابسته است.
 
 ## حالت‌های خروجی
 
-از صفحه تنظیمات:
+از بخش تنظیمات می‌توانید یکی از این حالت‌ها را انتخاب کنید:
 
-- فقط کانفیگ: `بررسی کانفیگ‌های V2Ray/Xray` روشن، `بررسی پروکسی‌های تلگرام` خاموش.
-- فقط پروکسی: `بررسی کانفیگ‌های V2Ray/Xray` خاموش، `بررسی پروکسی‌های تلگرام` روشن.
-- هر دو: هر دو گزینه روشن.
+- **فقط کانفیگ:** بررسی V2Ray/Xray روشن و بررسی پروکسی تلگرام خاموش
+- **فقط پروکسی:** بررسی V2Ray/Xray خاموش و بررسی پروکسی تلگرام روشن
+- **هر دو:** هر دو گزینه روشن
 
-اگر هر دو گزینه خاموش باشند، برنامه شروع نمی‌شود و هشدار می‌دهد.
+اگر هر دو گزینه خاموش باشند، برنامه پیش از شروع هشدار می‌دهد.
 
-## اجرای تستی
+## فایل‌های خروجی
+
+| فایل | محتوا |
+|---|---|
+| `sub.txt` | کانفیگ‌های سالم V2Ray/Xray |
+| `sub_base64.txt` | نسخه Base64 اشتراک کانفیگ‌ها |
+| `proxy.txt` | پروکسی‌های سالم Telegram MTProto/SOCKS |
+| `proxy_base64.txt` | نسخه Base64 پروکسی‌ها |
+| `alive_report.txt` | گزارش خوانا از کانفیگ‌های سالم |
+| `proxy_report.txt` | گزارش خوانا از پروکسی‌ها |
+| `report.json` | گزارش کامل و ساختاریافته |
+| `all_configs_stage1.txt` | داده خام جمع‌آوری‌شده پیش از تست |
+
+## دانلود نسخه آماده
+
+فایل اجرایی ویندوز از بخش [Releases](https://github.com/mcodersir/DicodeConfigChecker/releases/latest) در دسترس است.
+
+بعد از دانلود، فایل EXE را در یک پوشه با دسترسی نوشتن اجرا کنید تا خروجی‌ها در همان مسیر ذخیره شوند. Windows Defender یا آنتی‌ویروس ممکن است فایل‌های ساخته‌شده با PyInstaller را در اولین اجرا بررسی کند.
+
+## ساخت و اجرا
+
+### پیش‌نیازها
+
+- Windows 10 یا Windows 11
+- Python 3.10 یا جدیدتر
+- اتصال اینترنت برای نصب وابستگی‌ها و دریافت اختیاری Xray-core
+
+### اجرای نسخه توسعه
 
 ```bat
 run_dev.bat
 ```
 
-## ساخت EXE
+### ساخت فایل EXE
 
 ```bat
 build_exe.bat
 ```
 
-خروجی‌ها:
+خروجی اصلی در این مسیر ساخته می‌شود:
 
 ```text
 dist\DicodeConfigChecker.exe
-release\DicodeConfigChecker-v1.0.1-windows.exe
 ```
 
-## دیپلوی و انتشار روی GitHub
+نسخه نام‌گذاری‌شده برای انتشار نیز در پوشه `release` قرار می‌گیرد.
 
-روی ویندوز این فایل را اجرا کن:
+## مدیریت فهرست کانال‌ها
 
-```bat
-deploy_release_v1_0_1.bat
-```
-
-پیش‌نیازها:
-
-- Python 3.10+
-- Git نصب‌شده و داخل PATH
-- GitHub token با دسترسی repo، یا متغیر محیطی `GITHUB_TOKEN`
-
-پیش‌فرض ریپو داخل اسکریپت:
+فهرست منابع در فایل زیر قرار دارد:
 
 ```text
-mcodersir/DicodeConfigChecker
+channels.txt
 ```
 
-اگر ریپو فرق دارد، `publish_to_github.ps1` را باز کن و مقدارهای `Owner` و `RepoName` را تغییر بده.
+هر خط باید فقط شامل یک آدرس عمومی تلگرام با این قالب باشد:
 
-## فایل‌های خروجی برنامه
-
-- `sub.txt`: کانفیگ‌های سالم V2Ray/Xray
-- `sub_base64.txt`: subscription base64
-- `proxy.txt`: پروکسی‌های سالم تلگرام
-- `proxy_base64.txt`: پروکسی‌های base64
-- `alive_report.txt`: گزارش کانفیگ‌ها
-- `proxy_report.txt`: گزارش پروکسی‌ها
-- `report.json`: گزارش کامل ماشینی
-
-
-## GitHub deploy if `api.github.com` fails
-
-If deployment fails with `The remote name could not be resolved: 'api.github.com'`, the EXE has usually been built already and only GitHub publishing failed.
-
-Use:
-
-```bat
-deploy_release_v1_0_1_with_proxy.bat
+```text
+t.me/channel_username
 ```
 
-Enter an HTTP proxy such as `http://127.0.0.1:7890` or `http://127.0.0.1:10809`.
+ترتیب خطوط حفظ می‌شود و موارد تکراری هنگام پردازش کنار گذاشته می‌شوند.
 
-If `release\DicodeConfigChecker-v1.0.1-windows.exe` already exists, use:
+## مشارکت در فهرست کانال‌ها
 
-```bat
-publish_release_only_v1_0_1_with_proxy.bat
-```
+در حال حاضر مسیر مشارکت عمومی پروژه روی **پیشنهاد و اصلاح کانال‌های منبع** متمرکز است.
 
-For diagnosis:
+برای پیشنهاد کانال جدید، از فرم زیر استفاده کنید:
 
-```bat
-diagnose_github_connection.bat
-```
+<p align="center">
+  <a href="https://github.com/mcodersir/DicodeConfigChecker/issues/new?template=channel-suggestion.yml"><img src="https://img.shields.io/badge/پیشنهاد_کانال-ثبت_Issue-2ea44f?style=for-the-badge" alt="Suggest a channel"></a>
+</p>
 
+کانال پیشنهادی باید:
 
-## Deploy v1.0.1 without local GitHub API
+- عمومی و بدون نیاز به عضویت اجباری برای مشاهده اولیه باشد؛
+- به‌صورت منظم کانفیگ یا پروکسی منتشر کند؛
+- در فهرست فعلی تکراری نباشد؛
+- لینک مستقیم و معتبر `t.me` داشته باشد؛
+- محتوای نامرتبط، فریبنده یا اسپم غالب نداشته باشد.
 
-If PowerShell cannot connect to `api.github.com`, use the GitHub Actions deploy path instead of the direct REST deploy path:
+پس از بررسی و اضافه شدن پیشنهاد، نام حساب GitHub پیشنهاددهنده در بخش مشارکت‌کنندگان کانال ثبت می‌شود. جزئیات بیشتر در [راهنمای مشارکت](CONTRIBUTING.md) آمده است.
 
-```bat
-deploy_via_github_actions_v1_0_1.bat
-```
+## سازندگان و مشارکت‌کنندگان
 
-This script only pushes the source and `v1.0.1` tag. GitHub Actions then builds the Windows EXE and creates the release on GitHub servers.
+<table>
+  <tr>
+    <td align="center" width="180">
+      <a href="https://github.com/mcodersir">
+        <img src="https://github.com/mcodersir.png?size=120" width="88" alt="M_CODER"><br>
+        <strong>M_CODER</strong>
+      </a><br>
+      <sub>سازنده و توسعه‌دهنده اصلی<br>طراحی محصول و رابط کاربری</sub>
+    </td>
+    <td align="center" width="180">
+      <a href="https://github.com/farhadfwladyan">
+        <img src="https://github.com/farhadfwladyan.png?size=120" width="88" alt="farhadfwladyan"><br>
+        <strong>farhadfwladyan</strong>
+      </a><br>
+      <sub>مشارکت‌کننده فهرست کانال‌ها</sub>
+    </td>
+  </tr>
+</table>
 
-Direct local deploy is still available through:
+## نکات مهم
 
-```bat
-deploy_release_v1_0_1_with_proxy.bat
-```
+- منابع این پروژه کانال‌های عمومی و مستقل هستند و حضور یک کانال در فهرست به معنی تایید محتوای آن نیست.
+- سالم بودن یک کانفیگ یا پروکسی دائمی نیست و ممکن است در هر لحظه تغییر کند.
+- پروژه هیچ سرور، کانفیگ یا پروکسی را میزبانی یا فروش نمی‌کند.
+- مسئولیت استفاده از خروجی‌ها و رعایت قوانین محل زندگی بر عهده کاربر است.
 
-For proxy diagnostics:
+## مجوز
 
-```bat
-diagnose_proxy_ports.bat
-```
-
-## رفع خطای `remote: invalid credentials`
-
-در نسخه فیکس‌شده، اسکریپت `deploy_via_github_actions.ps1` دیگر از `Bearer` برای `git push` استفاده نمی‌کند. توکن به شکل درستِ HTTPS Git یعنی Basic Auth در حافظه ارسال می‌شود و Credential Manager ویندوز برای همان دستور غیرفعال می‌شود تا اکانت/توکن قدیمی دخالت نکند.
-
-توکن کلاسیک GitHub باید این scopeها را داشته باشد:
-
-- `repo`
-- `workflow`
-
-بعد فقط این فایل را اجرا کن:
-
-```bat
-deploy_via_github_actions_v1_0_1.bat
-```
-
-
-
-### Tag push fix
-
-If the deploy stops at `error: tag 'v1.0.1' not found`, use this package and run:
-
-```bat
-deploy_via_github_actions_v1_0_1.bat
-```
-
-The script now creates or replaces the tag safely with `git tag -f -a` and pushes `refs/tags/v1.0.1 --force`.
-
-## Deploy when Git cannot resolve github.com
-
-If you see `Could not resolve host: github.com`, run:
-
-```bat
-diagnose_git_github_dns_proxy.bat
-```
-
-Then run:
-
-```bat
-deploy_via_github_actions_v1_0_1.bat
-```
-
-and enter your local Git proxy, for example `http://127.0.0.1:10809` or `socks5h://127.0.0.1:10808`.
-
-
-## Branch + tag push fix
-The deploy script now creates the local tag before pushing and sends `main` plus `refs/tags/v1.0.1` in one `git push` command. This avoids the old case where the source push succeeded but the second tag push failed because Windows DNS broke between two separate Git connections. It also auto-retries direct mode and common local proxies.
-
-If `main` is already pushed and only the tag failed, run:
-
-```bat
-push_release_tag_v1_0_1_only.bat
-```
-
-
-## No-proxy push fix
-
-The deploy scripts are now direct-by-default. Leaving the proxy prompt empty means no proxy is used, and the script no longer auto-tries common proxy ports after a direct push. `main` and `refs/tags/v1.0.1` are pushed in one Git command.
+این پروژه تحت مجوز موجود در فایل [LICENSE](LICENSE) منتشر شده است.

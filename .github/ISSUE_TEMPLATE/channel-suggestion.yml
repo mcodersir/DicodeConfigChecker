@@ -1,0 +1,63 @@
+name: پیشنهاد یا اصلاح کانال
+description: پیشنهاد کانال عمومی جدید یا گزارش کانال نامعتبر در فهرست فعلی
+title: "[Channel]: "
+labels:
+  - channel-suggestion
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ممنون که برای بهتر شدن فهرست کانال‌ها وقت می‌گذارید. لطفاً برای هر کانال یک Issue جدا ثبت کنید.
+
+  - type: dropdown
+    id: request-type
+    attributes:
+      label: نوع درخواست
+      options:
+        - اضافه کردن کانال جدید
+        - حذف کانال نامعتبر
+        - اصلاح نام کاربری یا لینک کانال
+    validations:
+      required: true
+
+  - type: input
+    id: channel-link
+    attributes:
+      label: لینک کانال
+      description: لینک مستقیم و عمومی کانال را وارد کنید.
+      placeholder: t.me/channel_username
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel-content
+    attributes:
+      label: محتوای اصلی کانال
+      options:
+        - کانفیگ V2Ray/Xray
+        - پروکسی Telegram
+        - هر دو
+        - سایر موارد مرتبط
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: توضیحات
+      description: درباره فعالیت کانال، دلیل پیشنهاد یا علت حذف و اصلاح آن کوتاه توضیح دهید.
+      placeholder: این کانال به‌صورت عمومی و منظم ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: بررسی اولیه
+      options:
+        - label: لینک را بررسی کرده‌ام و کانال در حال حاضر عمومی است.
+          required: true
+        - label: نام کاربری کانال را در channels.txt جست‌وجو کرده‌ام و پیشنهاد تکراری نیست.
+          required: true
+        - label: محتوای غالب کانال با کانفیگ یا پروکسی مرتبط است.
+          required: true
