@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate Python sources
-        run: python -m py_compile engine.py app.py desktop.py
+        run: python -m py_compile engine.py app.py desktop.py scripts/patch_android_ui.py
       - name: Run regression tests
         continue-on-error: true
         run: |
@@ -149,6 +149,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Apply responsive minimal Android UI
+        run: |
+          python scripts/patch_android_ui.py
+          grep -q 'setDecorFitsSystemWindows(window, true)' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'val compact = maxWidth < 420.dp' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
       - name: Build Android APK with Xray core
         run: |
           gradle -p android :app:assembleDebug --stacktrace
@@ -184,7 +189,7 @@ jobs:
         run: |
           gh release delete v1.1.0 --cleanup-tag --yes 2>/dev/null || true
           gh release create v1.1.0 release/* \
-            --title 'Dicode Config Checker v1.1.0 Complete Preview' \
+            --title 'Dicode Config Checker v1.1.0 Android UI Hotfix' \
             --notes-file RELEASE_NOTES_1.1.0.md \
             --target '${{ github.sha }}' \
             --prerelease
