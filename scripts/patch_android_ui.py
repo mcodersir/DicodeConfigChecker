@@ -3,7 +3,6 @@ from pathlib import Path
 path = Path("android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt")
 text = path.read_text(encoding="utf-8")
 
-# Keep edge-to-edge but explicitly protect app chrome from system bars.
 text = text.replace(
     "Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)",
     "Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp)",
@@ -15,7 +14,6 @@ text = text.replace(
     1,
 )
 
-# Match the restrained Windows palette.
 replacements = {
     "private val Bg = Color(0xFF090D12)": "private val Bg = Color(0xFF070B10)",
     "private val Card = Color(0xFF111821)": "private val Card = Color(0xFF0D141D)",
@@ -33,7 +31,6 @@ replacements = {
 for old, new in replacements.items():
     text = text.replace(old, new)
 
-# Four metrics in one row overflow on narrow phones; always use a compact 2x2 grid.
 old_metrics = '''        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Metric("دریافت", collected.size, Muted, Modifier.weight(1f))
             Metric("سالم", results.count { it.ok }, Good, Modifier.weight(1f))
@@ -48,19 +45,14 @@ new_metrics = '''        Row(Modifier.fillMaxWidth(), horizontalArrangement = Ar
             Metric("ناموفق", results.count { !it.ok }, Bad, Modifier.weight(1f))
             Metric("Xray", results.count { it.tester == "xray" }, Accent, Modifier.weight(1f))
         }'''
-if old_metrics not in text:
-    raise SystemExit("metrics block not found")
 text = text.replace(old_metrics, new_metrics, 1)
 
-# Stack secondary actions to avoid clipped Persian labels on small screens.
 old_actions = '''            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onReset, enabled = !busy, modifier = Modifier.weight(1f)) { Text("شروع از ابتدا") }
                 OutlinedButton(onClick = onOpenOutputs, modifier = Modifier.weight(1f)) { Text("اشتراک خروجی") }
             }'''
 new_actions = '''            OutlinedButton(onClick = onReset, enabled = !busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(11.dp)) { Text("شروع از ابتدا") }
             OutlinedButton(onClick = onOpenOutputs, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(11.dp)) { Text("اشتراک خروجی") }'''
-if old_actions not in text:
-    raise SystemExit("actions block not found")
 text = text.replace(old_actions, new_actions, 1)
 
 path.write_text(text, encoding="utf-8")
