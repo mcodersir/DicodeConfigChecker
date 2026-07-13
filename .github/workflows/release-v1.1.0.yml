@@ -152,8 +152,8 @@ jobs:
       - name: Apply responsive minimal Android UI
         run: |
           python scripts/patch_android_ui.py
-          grep -q 'setDecorFitsSystemWindows(window, true)' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
-          grep -q 'val compact = maxWidth < 420.dp' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'statusBarsPadding()' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'navigationBarsPadding()' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
       - name: Build Android APK with Xray core
         run: |
           gradle -p android :app:assembleDebug --stacktrace
