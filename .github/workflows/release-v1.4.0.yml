@@ -1,0 +1,72 @@
+name: Build Dicode Config Checker v1.4.0 Stable
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  VERSION: 1.4.0
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-build.txt
+      - run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name DicodeConfigChecker --icon assets/app.ico app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/DicodeConfigChecker.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-build.txt
+      - run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name DicodeConfigChecker desktop.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/DicodeConfigChecker
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: gradle -p android :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  release:
+    needs: [windows, linux, android]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete v1.4.0 --cleanup-tag --yes 2>/dev/null || true
+          gh release create v1.4.0 release/** --title 'Dicode Config Checker v1.4.0 Stable' --notes 'Stable multiplatform release: Android, Windows and Linux. Improved home dashboard, action states, minimal buttons, better UX and packaging.'
