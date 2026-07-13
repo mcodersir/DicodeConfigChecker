@@ -16,4 +16,16 @@ concurrency:
 
 env:
   VERSION: 1.4.0
-  ANDROID_LIB_COMMIT: ecf84ee82ac975c39852397351d1618a40
+  ANDROID_LIB_COMMIT: ecf84ee82ac975c39852397351d1618a40df7cd2
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate sources and release patches
+        run: |
+          python -m py_compile engine.py app.py desktop.py scripts/patch_android_ui.py
