@@ -17,7 +17,10 @@ def once(old: str, new: str, name: str) -> None:
 
 def regex(pattern: str, replacement: str, name: str) -> None:
     global text
-    text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    # Replacement blocks include Kotlin regexes (for example `\\s`), so pass
+    # them through a callable and keep Python's regex engine from interpreting
+    # their backslashes as replacement escapes.
+    text, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)
     if count != 1:
         raise SystemExit(f"{name}: source block changed")
 
