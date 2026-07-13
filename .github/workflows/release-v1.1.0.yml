@@ -159,13 +159,26 @@ jobs:
           p.write_text(s, encoding='utf-8')
           PY
           python scripts/patch_android_ui.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt')
+          s = p.read_text(encoding='utf-8')
+          start = s.index('                        val linkRegex = Regex(')
+          end = s.index('\n                        var count = 0', start)
+          replacement = '''                        val linkRegex = Regex("""(?:vmess|vless|trojan|ss|ssr|snell|hysteria2|hy2|tuic)://[^\\s<>\"'`]+|(?:tg://(?:proxy|socks)|https://t\\.me/(?:proxy|socks))\\?[^\\s<>\"'`]+""", RegexOption.IGNORE_CASE)'''
+          s = s[:start] + replacement + s[end:]
+          p.write_text(s, encoding='utf-8')
+          PY
           grep -q 'statusBarsPadding()' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
           grep -q 'navigationBarsPadding()' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
           grep -q 'pingWorkers' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
           grep -q 'DefaultChannels' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
       - name: Build Android APK with Xray core
         run: |
-          gradle -p android :app:assembleDebug --stacktrace
+          if ! gradle -p android :app:assembleDebug --stacktrace > gradle-build.log 2>&1; then
+            tail -n 240 gradle-build.log
+            exit 1
+          fi
           test -f android/app/build/outputs/apk/debug/app-debug.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk DicodeConfigChecker-v1.1.0-android-preview.apk
       - uses: actions/upload-artifact@v4
