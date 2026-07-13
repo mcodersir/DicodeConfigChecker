@@ -151,9 +151,18 @@ jobs:
           gradle-version: '8.11.1'
       - name: Apply responsive minimal Android UI
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/patch_android_ui.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('re.subn(pattern, replacement, text, count=1, flags=re.S)', 're.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)')
+          p.write_text(s, encoding='utf-8')
+          PY
           python scripts/patch_android_ui.py
           grep -q 'statusBarsPadding()' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
           grep -q 'navigationBarsPadding()' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'pingWorkers' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'DefaultChannels' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
       - name: Build Android APK with Xray core
         run: |
           gradle -p android :app:assembleDebug --stacktrace
@@ -189,7 +198,7 @@ jobs:
         run: |
           gh release delete v1.1.0 --cleanup-tag --yes 2>/dev/null || true
           gh release create v1.1.0 release/* \
-            --title 'Dicode Config Checker v1.1.0 Android UI Hotfix' \
+            --title 'Dicode Config Checker v1.1.0 Android Performance Update' \
             --notes-file RELEASE_NOTES_1.1.0.md \
             --target '${{ github.sha }}' \
             --prerelease
