@@ -577,6 +577,48 @@ class IconButton(QPushButton):
         self.setMinimumHeight(42)
 
 
+class HomeStepCard(QFrame):
+    """A compact stateful operation card for the home screen."""
+
+    def __init__(self, number: int, title: str, subtitle: str, button_text: str, icon_name: str) -> None:
+        super().__init__()
+        self.setObjectName("HomeStepCard")
+        self.setProperty("state", "idle")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 14, 15, 14)
+        layout.setSpacing(9)
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        badge = QLabel(str(number))
+        badge.setObjectName("StepNumber")
+        badge.setFixedSize(32, 32)
+        badge.setAlignment(Qt.AlignCenter)
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("StepTitle")
+        self.title_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.state_label = QLabel("آماده")
+        self.state_label.setObjectName("StepState")
+        self.state_label.setAlignment(Qt.AlignCenter)
+        header.addWidget(badge)
+        header.addWidget(self.title_label, 1)
+        header.addWidget(self.state_label)
+        layout.addLayout(header)
+        hint = QLabel(subtitle)
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        hint.setLayoutDirection(Qt.RightToLeft)
+        hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        layout.addWidget(hint)
+        self.button = IconButton(button_text, icon_name, primary=True)
+        layout.addWidget(self.button)
+
+    def set_state(self, state: str, label: str) -> None:
+        self.setProperty("state", state)
+        self.state_label.setText(label)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+
 class NavButton(QToolButton):
     def __init__(self, text: str, icon_name: str, index: int) -> None:
         super().__init__()
@@ -800,6 +842,28 @@ class MainWindow(QMainWindow):
         pp.addWidget(self.progress_bar)
         page_layout.addWidget(progress_panel)
 
+        steps = QHBoxLayout()
+        steps.setSpacing(10)
+        self.step_collect = HomeStepCard(
+            1, "دریافت از کانال ها", "با اتصال فعلی، کانفیگ ها و پروکسی های عمومی را جمع آوری می کند.", "شروع دریافت", "play"
+        )
+        self.step_test = HomeStepCard(
+            2, "تست واقعی و ساخت خروجی", "بعد از قطع اتصال فعلی، موارد جمع آوری شده را با اینترنت خودت بررسی می کند.", "شروع تست واقعی", "next"
+        )
+        self.step_test.button.setEnabled(False)
+        steps.addWidget(self.step_collect, 1)
+        steps.addWidget(self.step_test, 1)
+        page_layout.addLayout(steps)
+
+        utility_actions = QHBoxLayout()
+        utility_actions.setSpacing(8)
+        self.btn_reset_run = IconButton("شروع دوباره", "reset")
+        self.btn_open = IconButton("پوشه خروجی", "folder")
+        utility_actions.addWidget(self.btn_open)
+        utility_actions.addWidget(self.btn_reset_run)
+        utility_actions.addStretch(1)
+        page_layout.addLayout(utility_actions)
+
         log_panel = QFrame()
         log_panel.setObjectName("Panel")
         lp = QVBoxLayout(log_panel)
@@ -821,20 +885,10 @@ class MainWindow(QMainWindow):
         lp.addWidget(self.log_box, 1)
         page_layout.addWidget(log_panel, 1)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        self.btn_start = IconButton("شروع بررسی", "play", primary=True)
-        self.btn_continue = IconButton("ادامه", "next")
-        self.btn_continue.setEnabled(False)
+        self.btn_start = self.step_collect.button
+        self.btn_continue = self.step_test.button
         self.btn_stop = IconButton("توقف موقت", "stop")
-        self.btn_reset_run = IconButton("شروع از ابتدا", "reset")
-        self.btn_open = IconButton("پوشه خروجی", "folder")
-        actions.addWidget(self.btn_open, 1)
-        actions.addWidget(self.btn_reset_run, 1)
-        actions.addWidget(self.btn_stop, 1)
-        actions.addWidget(self.btn_continue, 1)
-        actions.addWidget(self.btn_start, 2)
-        page_layout.addLayout(actions)
+        self.btn_stop.setVisible(False)
 
         self.btn_start.clicked.connect(self.start_run)
         self.btn_continue.clicked.connect(self.continue_run)
@@ -1354,6 +1408,8 @@ class MainWindow(QMainWindow):
         self.switch_page(0)
         self.set_running(True)
         self.btn_continue.setEnabled(False)
+        self.step_collect.set_state("running", "در حال دریافت")
+        self.step_test.set_state("blocked", "در انتظار")
         self.update_counters(0, 0, 0, 0)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("0%")
@@ -1372,6 +1428,7 @@ class MainWindow(QMainWindow):
     def continue_run(self) -> None:
         if self.worker:
             self.btn_continue.setEnabled(False)
+            self.step_test.set_state("running", "در حال تست")
             if getattr(self.worker, "_pause_requested", False):
                 self.append_log("INFO ادامه تست از توقف موقت.")
                 self.set_stage("ادامه تست")
@@ -1384,6 +1441,7 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             self.worker.request_stop()
             self.btn_continue.setEnabled(True)
+            self.step_test.set_state("ready", "آماده ادامه")
             self.progress_meta.setText("توقف موقت")
             self.append_log("INFO توقف موقت ثبت شد؛ برای ادامه روی دکمه ادامه بزن.")
             self.refresh_result_tabs()
@@ -1398,6 +1456,11 @@ class MainWindow(QMainWindow):
             self.worker.wait(1500)
         self.set_running(False)
         self.btn_continue.setEnabled(False)
+        self.btn_start.setText("شروع دریافت")
+        self.btn_continue.setText("شروع تست واقعی")
+        self.step_collect.set_state("idle", "آماده")
+        self.step_test.set_state("blocked", "ابتدا مرحله ۱")
+        self.btn_start.setEnabled(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("0%")
         self.progress_meta.setText("ریست شد")
@@ -1406,7 +1469,7 @@ class MainWindow(QMainWindow):
         self.append_log("INFO اجرا ریست شد؛ برای شروع دوباره روی شروع بررسی بزن.")
 
     def set_running(self, running: bool) -> None:
-        self.btn_start.setEnabled(not running)
+        self.btn_start.setEnabled(not running and self.step_collect.property("state") == "idle")
         self.btn_stop.setEnabled(running)
         if hasattr(self, "btn_reset_run"):
             self.btn_reset_run.setEnabled(True)
@@ -1414,6 +1477,11 @@ class MainWindow(QMainWindow):
         self.nav_channels.setEnabled(not running)
 
     def on_ask_disconnect(self) -> None:
+        self.step_collect.set_state("done", "تکمیل شد")
+        self.btn_start.setEnabled(False)
+        self.btn_start.setText("دریافت انجام شد")
+        self.step_test.set_state("ready", "آماده تست")
+        self.btn_continue.setText("شروع تست واقعی")
         self.btn_continue.setEnabled(True)
         self.progress_meta.setText("منتظر ادامه")
         QMessageBox.information(
@@ -1424,6 +1492,7 @@ class MainWindow(QMainWindow):
 
     def on_paused(self) -> None:
         self.btn_continue.setEnabled(True)
+        self.step_test.set_state("ready", "آماده ادامه")
         self.progress_meta.setText("توقف موقت")
         self.refresh_result_tabs()
         self.append_log("INFO خروجی‌های موقت ذخیره شدند؛ می‌توانی کپی کنی یا ادامه بدهی.")
@@ -1432,6 +1501,8 @@ class MainWindow(QMainWindow):
         self.set_running(False)
         self.btn_continue.setEnabled(False)
         self.set_stage("تمام شد")
+        self.step_test.set_state("done", "تکمیل شد")
+        self.btn_continue.setText("خروجی آماده است")
         self.progress_bar.setValue(self.progress_bar.maximum())
         self.progress_meta.setText("خروجی ساخته شد")
         self.refresh_result_tabs()
@@ -1451,6 +1522,7 @@ class MainWindow(QMainWindow):
         self.set_running(False)
         self.btn_continue.setEnabled(False)
         self.set_stage("خطا")
+        self.step_test.set_state("blocked", "خطا")
         self.progress_meta.setText("خطا")
         self.append_log(f"ERROR: {error}")
         try:
@@ -1816,6 +1888,34 @@ class MainWindow(QMainWindow):
                 color: white;
                 border-color: #ff7a86;
             }
+            #HomeStepCard {
+                background: #0f151e;
+                border: 1px solid #263244;
+                border-radius: 18px;
+            }
+            #HomeStepCard[state="ready"] { border-color: #2563eb; background: #0d1725; }
+            #HomeStepCard[state="running"] { border-color: #38bdf8; background: #0b1a29; }
+            #HomeStepCard[state="done"] { border-color: #216c57; background: #0a1714; }
+            #HomeStepCard[state="blocked"] { border-color: #202a39; background: #0c1118; }
+            #StepNumber {
+                background: #142238;
+                color: #67e8f9;
+                border: 1px solid #29496b;
+                border-radius: 16px;
+                font-size: 14px;
+                font-weight: 900;
+            }
+            #StepTitle { color: #f5f9ff; font-size: 15px; font-weight: 900; }
+            #StepState {
+                background: #172235;
+                color: #93c5fd;
+                border-radius: 9px;
+                padding: 5px 8px;
+                font-size: 11px;
+                font-weight: 900;
+            }
+            #HomeStepCard[state="done"] #StepState { background: #102a23; color: #63e6be; }
+            #HomeStepCard[state="blocked"] #StepState { background: #151b24; color: #718096; }
             QPushButton {
                 background: #111821;
                 border: 1px solid #263244;
