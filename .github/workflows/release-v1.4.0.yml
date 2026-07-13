@@ -8,8 +8,13 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: dicode-v1.4.0-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   VERSION: 1.4.0
+  ANDROID_LIB_COMMIT: ecf84ee82ac975c39852397351d1618a40df7cd2
 
 jobs:
   windows:
@@ -20,7 +25,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-build.txt
-      - run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name DicodeConfigChecker --icon assets/app.ico app.py
+      - run: |
+          python engine.py --download-xray-only
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name DicodeConfigChecker --icon assets/app.ico --add-data assets;assets --add-binary core/xray.exe;core desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -34,7 +41,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-build.txt
-      - run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name DicodeConfigChecker desktop.py
+      - run: |
+          python engine.py --download-xray-only
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name DicodeConfigChecker desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -48,8 +57,25 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+      - uses: android-actions/setup-android@v3
+      - run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'ndk;29.0.14206865'
+      - run: |
+          git clone https://github.com/2dust/AndroidLibXrayLite.git /tmp/AndroidLibXrayLite
+          cd /tmp/AndroidLibXrayLite
+          git checkout $ANDROID_LIB_COMMIT
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          gomobile init
+          go mod tidy
+          gomobile bind -androidapi 26 ./
+          cp libv2ray.aar $GITHUB_WORKSPACE/android/app/libs/libv2ray.aar
       - uses: gradle/actions/setup-gradle@v4
-      - run: gradle -p android :app:assembleDebug
+      - run: python scripts/patch_android_v140.py && gradle -p android :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: android
@@ -57,16 +83,15 @@ jobs:
 
   release:
     needs: [windows, linux, android]
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release
-      - name: Publish
+      - name: Publish stable release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete v1.4.0 --cleanup-tag --yes 2>/dev/null || true
-          gh release create v1.4.0 release/** --title 'Dicode Config Checker v1.4.0 Stable' --notes 'Stable multiplatform release: Android, Windows and Linux. Improved home dashboard, action states, minimal buttons, better UX and packaging.'
+          gh release create v1.4.0 release/** --title 'Dicode Config Checker v1.4.0 Stable' --notes 'Stable multiplatform release: Android APK, Windows EXE and Linux build. Redesigned home dashboard, smart stage actions, minimal icon buttons and improved UX.'
