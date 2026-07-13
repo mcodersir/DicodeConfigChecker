@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 APP_NAME = "Dicode Telegram Config Checker"
-VERSION = "1.0.1"
+VERSION = "1.4.0"
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", ROOT)).resolve() if IS_FROZEN else ROOT
