@@ -1,0 +1,119 @@
+name: Build Android v1.3.0 Preview
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dicode-android-v1.3.0-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_LIB_COMMIT: ecf84ee82ac975c39852397351d1618a40df7cd2
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate patch scripts
+        run: python -m py_compile scripts/patch_android_ui.py scripts/patch_android_v120.py scripts/patch_android_v120_imports.py scripts/patch_android_v130.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK and NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'ndk;29.0.14206865'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - name: Build Android Xray AAR
+        run: |
+          git clone https://github.com/2dust/AndroidLibXrayLite.git /tmp/AndroidLibXrayLite
+          cd /tmp/AndroidLibXrayLite
+          git checkout "$ANDROID_LIB_COMMIT"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          mkdir -p assets data
+          bash gen_assets.sh download
+          cp -v data/*.dat assets/
+          gomobile init
+          go mod tidy
+          gomobile bind -v -androidapi 26 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' ./
+          mkdir -p "$GITHUB_WORKSPACE/android/app/libs"
+          cp libv2ray.aar "$GITHUB_WORKSPACE/android/app/libs/libv2ray.aar"
+          test -s "$GITHUB_WORKSPACE/android/app/libs/libv2ray.aar"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Apply Android v1.3.0 UI patches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/patch_android_ui.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('re.subn(pattern, replacement, text, count=1, flags=re.S)', 're.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)')
+          p.write_text(s, encoding='utf-8')
+          PY
+          python scripts/patch_android_ui.py
+          python scripts/patch_android_v120.py
+          python scripts/patch_android_v120_imports.py
+          python scripts/patch_android_v130.py
+          grep -q 'private const val VERSION = "1.3.0"' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'results.filter { it.ok' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'باز کردن در تلگرام' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'VpnDisconnectCard' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt
+          grep -q 'versionName = "1.3.0"' android/app/build.gradle.kts
+      - name: Build APK
+        run: |
+          gradle -p android :app:assembleDebug --stacktrace 2>&1 | tee gradle-build.log
+          test -f android/app/build/outputs/apk/debug/app-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk DicodeConfigChecker-v1.3.0-android-preview.apk
+      - name: Upload Gradle diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-v1.3.0-gradle-log
+          path: gradle-build.log
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-v1.3.0
+          path: DicodeConfigChecker-v1.3.0-android-preview.apk
+          if-no-files-found: error
+
+  prerelease:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-v1.3.0
+          path: release
+      - name: Publish v1.3.0 prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          sha256sum DicodeConfigChecker-v1.3.0-android-preview.apk > SHA256SUMS.txt
+          gh release delete v1.3.0 --cleanup-tag --yes 2>/dev/null || true
+          gh release create v1.3.0 DicodeConfigChecker-v1.3.0-android-preview.apk SHA256SUMS.txt \
+            --title 'Dicode Config Checker v1.3.0 Android' \
+            --notes 'Android preview: healthy-only output lists, copy all configs and proxies, Telegram proxy deep links, in-app VPN disconnect helper, tabbed settings, redesigned custom controls, and simplified bottom navigation.' \
+            --target '${{ github.sha }}' \
+            --prerelease
