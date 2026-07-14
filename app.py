@@ -1071,7 +1071,7 @@ class MainWindow(QMainWindow):
         p2_l = QVBoxLayout(p2_box); p2_l.setContentsMargins(12, 10, 12, 12); p2_l.setSpacing(8)
         p2_title = QLabel("کانال‌های رتبه دوم")
         p2_title.setObjectName("SectionTitle"); p2_title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        p2_hint = QLabel("لیست عمومی کانال‌ها؛ هر خط یک لینک t.me یا یوزرنیم ساده.")
+        p2_hint = QLabel("هر خط یک لینک t.me / telegram.me یا یوزرنیم ساده؛ در اختلال t.me، جایگزین خودکار انجام می‌شود.")
         p2_hint.setObjectName("Muted"); p2_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter); p2_hint.setLayoutDirection(Qt.RightToLeft)
         self.priority2_editor = QPlainTextEdit()
         self.priority2_editor.setObjectName("ChannelEditor")
@@ -1249,7 +1249,7 @@ class MainWindow(QMainWindow):
 
     def split_priority_from_channels(self, text: str) -> tuple[str, str]:
         lines = CheckerWorker.normalize_channel_text(text)
-        p1_set = {x.lower().replace("t.me/", "") for x in getattr(engine, "MAIN_CHANNELS", set())}
+        p1_set = {x.lower().replace("t.me/", "").replace("telegram.me/", "") for x in getattr(engine, "MAIN_CHANNELS", set())}
         p1: list[str] = []
         p2: list[str] = []
         seen: set[str] = set()
