@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from unittest.mock import patch
 
 import engine
 
@@ -51,3 +52,25 @@ def test_config_name_rewrite() -> None:
     raw = "vless://id@example.com:443?security=tls#old"
     renamed = engine.set_config_display_name(raw, "t.me/dicodeir-1")
     assert renamed.endswith("#t.me/dicodeir-1")
+
+
+def test_telegram_me_channel_is_accepted() -> None:
+    assert engine.normalize_channel("https://telegram.me/example_channel") == "example_channel"
+    assert engine.normalize_channel("telegram.me/s/example_channel") == "example_channel"
+
+
+def test_preview_uses_telegram_me_only_after_t_me_fails() -> None:
+    calls: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        calls.append(url)
+        if "t.me/" in url and "telegram.me" not in url:
+            raise OSError("DNS lookup failed")
+        return "<div>vless://id@example.com:443?security=tls</div>"
+
+    with patch.object(engine, "fetch_url", fake_fetch):
+        result = engine.fetch_channel("example_channel")
+
+    assert result["ok"] is True
+    assert result["preview_host"] == "telegram.me"
+    assert calls == ["https://t.me/s/example_channel", "https://telegram.me/s/example_channel"]
