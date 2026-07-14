@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 APP_NAME = "Dicode Telegram Config Checker"
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", ROOT)).resolve() if IS_FROZEN else ROOT
@@ -498,9 +498,9 @@ def normalize_channel(value: str) -> Optional[str]:
     s = value.strip()
     if not s or s.startswith("#"):
         return None
-    if "t.me/+" in s:
+    if re.search(r"(?:t|telegram)\.me/\+", s, re.IGNORECASE):
         return None
-    m = re.search(r"t\.me/(?:s/)?([a-zA-Z0-9_]+)", s)
+    m = re.search(r"(?:t|telegram)\.me/(?:s/)?([a-zA-Z0-9_]+)", s, re.IGNORECASE)
     if m:
         return m.group(1)
     if re.fullmatch(r"[a-zA-Z0-9_]+", s):
@@ -515,7 +515,7 @@ def read_channels() -> list[str]:
     seen: set[str] = set()
     skipped_private = 0
     for line in raw:
-        if "t.me/+" in line:
+        if re.search(r"(?:t|telegram)\.me/\+", line, re.IGNORECASE):
             skipped_private += 1
             continue
         ch = normalize_channel(line)
@@ -548,10 +548,21 @@ def fetch_url(url: str) -> str:
 
 def fetch_channel(channel: str) -> dict[str, Any]:
     limit = MAIN_CHANNEL_LIMIT if channel.lower() in MAIN_CHANNELS else PER_CHANNEL_LIMIT
-    url = f"https://t.me/s/{channel}"
     started = time.time()
     try:
-        page = fetch_url(url)
+        # t.me remains the normal path. The alternative host is used only when
+        # the primary preview request genuinely fails on the user's network.
+        preview_host = "t.me"
+        try:
+            page = fetch_url(f"https://t.me/s/{channel}")
+        except Exception as primary_error:
+            preview_host = "telegram.me"
+            try:
+                page = fetch_url(f"https://telegram.me/s/{channel}")
+            except Exception as fallback_error:
+                raise RuntimeError(
+                    f"t.me unavailable ({primary_error}); telegram.me also failed ({fallback_error})"
+                ) from fallback_error
         configs = extract_configs(page)
         picked = configs[:limit]
         return {
@@ -561,6 +572,7 @@ def fetch_channel(channel: str) -> dict[str, Any]:
             "picked": len(picked),
             "elapsed_ms": int((time.time() - started) * 1000),
             "configs": picked,
+            "preview_host": preview_host,
             "error": "",
         }
     except Exception as e:
@@ -571,6 +583,7 @@ def fetch_channel(channel: str) -> dict[str, Any]:
             "picked": 0,
             "elapsed_ms": int((time.time() - started) * 1000),
             "configs": [],
+            "preview_host": "",
             "error": str(e),
         }
 
