@@ -1179,12 +1179,18 @@ def download_url_to_file(url: str, target: Path, timeout: float) -> None:
 
 
 def get_latest_xray_asset() -> tuple[str, str]:
+    headers = {
+        "User-Agent": "DicodeConfigChecker/1.0",
+        "Accept": "application/vnd.github+json",
+    }
+    # GitHub Actions supplies this short-lived token to the release build.  It
+    # avoids anonymous API-rate-limit failures while keeping desktop users
+    # entirely token-free.
+    if os.environ.get("GITHUB_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
     req = urllib.request.Request(
         XRAY_RELEASE_API,
-        headers={
-            "User-Agent": "DicodeConfigChecker/1.0",
-            "Accept": "application/vnd.github+json",
-        },
+        headers=headers,
     )
     with urlopen_with_optional_proxy(req, timeout=XRAY_DOWNLOAD_TIMEOUT) as r:
         data = json.loads(r.read().decode("utf-8", errors="ignore"))
