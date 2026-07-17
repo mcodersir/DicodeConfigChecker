@@ -56,6 +56,7 @@ import subscription_publisher
 
 APP_TITLE = "Dicode Config Checker"
 APP_VERSION = engine.VERSION
+GITHUB_TOKEN_CREATE_URL = "https://github.com/settings/tokens/new?scopes=public_repo&description=DicodeConfigChecker%20Personal%20Subscription"
 
 
 @dataclass
@@ -968,7 +969,7 @@ class MainWindow(QMainWindow):
         self.add_field(rank_grid, 0, 1, "تعداد کانفیگ از هر کانال رتبه اول", self.main_limit)
         layout.addWidget(rank_box)
 
-        speed_box = section("سرعت و کیفیت تست", "برای کیفیت بهتر، تعداد تلاش و حداقل موفقیت را بیشتر کن؛ برای سرعت بیشتر Ping workers را افزایش بده.")
+        speed_box = section("سرعت و کیفیت تست", "پیش‌فرض سریع‌تر شده است: نمونه‌های هر سرور و معیار تایید تغییری نکرده؛ فقط چند مورد هم‌زمان‌تر بررسی می‌شوند.")
         speed_grid = speed_box._grid  # type: ignore[attr-defined]
         self.add_field(speed_grid, 0, 0, "Fetch workers", self.fetch_workers)
         self.add_field(speed_grid, 0, 1, "Ping workers", self.ping_workers)
@@ -994,8 +995,14 @@ class MainWindow(QMainWindow):
         output_grid.addWidget(opt, 1, 0, 1, 2)
         layout.addWidget(output_box)
 
-        subscription_box = section("ساب اختصاصی GitHub", "پس از پایان هر تست، sub.txt و proxy.txt سالم در ریپازیتوری عمومی خودت ساخته یا به روز می شوند.")
+        subscription_box = section("ساب اختصاصی GitHub", "بدون نیاز به آشنایی با GitHub: سه قدم زیر را انجام بده؛ پس از هر تست، sub.txt و proxy.txt سالم خودکار به‌روز می‌شوند.")
         subscription_grid = subscription_box._grid  # type: ignore[attr-defined]
+        subscription_steps = QLabel("۱. روی «ساخت توکن» بزن و وارد GitHub شو.\n۲. در صفحه بازشده فقط public_repo را انتخاب‌شده نگه دار، پایین صفحه Generate token را بزن و آن را کپی کن.\n۳. توکن را اینجا بچسبان و «ذخیره و فعال‌سازی» را بزن.")
+        subscription_steps.setObjectName("Muted")
+        subscription_steps.setWordWrap(True)
+        subscription_steps.setLayoutDirection(Qt.RightToLeft)
+        self.btn_open_token_page = IconButton("۱. ساخت توکن در GitHub", "open")
+        self.btn_open_token_page.clicked.connect(self.open_github_token_page)
         self.github_token = QLineEdit()
         self.github_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.github_token.setPlaceholderText("ghp_... (Classic PAT با public_repo)")
@@ -1007,11 +1014,13 @@ class MainWindow(QMainWindow):
         self.subscription_proxy_url = QLineEdit(); self.subscription_proxy_url.setReadOnly(True)
         self.btn_save_subscription = IconButton("ذخیره و فعال سازی ساب", "save", primary=True)
         self.btn_save_subscription.clicked.connect(self.save_subscription_settings)
-        self.add_field(subscription_grid, 0, 0, "GitHub Classic PAT (public_repo)", self.github_token, 2)
-        self.add_field(subscription_grid, 1, 0, "ریپازیتوری عمومی ساب", self.subscription_repo, 2)
-        self.add_field(subscription_grid, 2, 0, "لینک sub.txt", self.subscription_sub_url, 2)
-        self.add_field(subscription_grid, 3, 0, "لینک proxy.txt", self.subscription_proxy_url, 2)
-        subscription_grid.addWidget(self.btn_save_subscription, 4, 0, 1, 2)
+        subscription_grid.addWidget(subscription_steps, 0, 0, 1, 2)
+        subscription_grid.addWidget(self.btn_open_token_page, 1, 0, 1, 2)
+        self.add_field(subscription_grid, 2, 0, "۲. GitHub Classic PAT (public_repo)", self.github_token, 2)
+        subscription_grid.addWidget(self.btn_save_subscription, 3, 0, 1, 2)
+        self.add_field(subscription_grid, 4, 0, "ریپازیتوری عمومی ساب", self.subscription_repo, 2)
+        self.add_field(subscription_grid, 5, 0, "لینک sub.txt", self.subscription_sub_url, 2)
+        self.add_field(subscription_grid, 6, 0, "لینک proxy.txt", self.subscription_proxy_url, 2)
         layout.addWidget(subscription_box)
 
         reset_wrap = QFrame()
@@ -1342,6 +1351,10 @@ class MainWindow(QMainWindow):
         self.app_settings.sync()
         self.append_log("OK ساب اختصاصی فعال شد؛ بعد از پایان تست بعدی، فایل ها در GitHub منتشر می شوند.")
         QMessageBox.information(self, "ساب اختصاصی", "تنظیمات ذخیره شد. بعد از پایان تست، ریپازیتوری عمومی تصادفی با پایان DIC و لینک‌های raw برای sub.txt و proxy.txt ساخته می‌شوند.")
+
+    def open_github_token_page(self) -> None:
+        webbrowser.open(GITHUB_TOKEN_CREATE_URL)
+        self.append_log("INFO صفحه ساخت GitHub token باز شد؛ پس از ساخت، توکن را در مرحله ۲ تنظیمات بچسبان.")
 
     def publish_personal_subscription(self) -> None:
         token = self.github_token.text().strip()
