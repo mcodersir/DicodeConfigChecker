@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 APP_NAME = "Dicode Telegram Config Checker"
-VERSION = "1.4.1"
+VERSION = "1.4.9"
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", ROOT)).resolve() if IS_FROZEN else ROOT
@@ -1565,8 +1565,11 @@ def telegram_socks_delay_ms(host: str, port: int, timeout: float) -> tuple[Optio
         resp = recv_exact(s, 2)
         if len(resp) != 2 or resp[0] != 5 or resp[1] != 0:
             return None, "socks_auth_failed"
-        host_bytes = target_host.encode("ascii")
-        req = b"\x05\x01\x00\x03" + bytes([len(host_bytes)]) + host_bytes + int(target_port).to_bytes(2, "big")
+        # Use the SOCKS5 IPv4 form rather than asking the proxy to resolve a
+        # numeric address as a hostname.  A surprising number of otherwise
+        # healthy Telegram SOCKS endpoints reject that less common form.
+        host_bytes = socket.inet_aton(target_host)
+        req = b"\x05\x01\x00\x01" + host_bytes + int(target_port).to_bytes(2, "big")
         s.sendall(req)
         head = recv_exact(s, 4)
         if len(head) != 4 or head[1] != 0:
