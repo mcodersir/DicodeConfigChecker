@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 APP_NAME = "Dicode Telegram Config Checker"
-VERSION = "1.4.9"
+VERSION = "1.5.0"
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", ROOT)).resolve() if IS_FROZEN else ROOT
@@ -341,7 +341,7 @@ XRAY_STARTUP_WAIT = env_float("XRAY_STARTUP_WAIT", 1.2)
 XRAY_PROCESS_TIMEOUT = env_float("XRAY_PROCESS_TIMEOUT", 18.0)
 CHECK_URL = env_str("CHECK_URL", "http://www.gstatic.com/generate_204")
 
-PING_WORKERS = env_int("PING_WORKERS", 4)
+PING_WORKERS = env_int("PING_WORKERS", 8)
 TCP_FALLBACK_WORKERS = env_int("TCP_FALLBACK_WORKERS", 32)
 SOCKET_TIMEOUT = env_float("SOCKET_TIMEOUT", 8.0)
 TCP_TIMEOUT = env_float("TCP_TIMEOUT", 4.0)
@@ -443,7 +443,9 @@ def banner() -> None:
 
 def ensure_files() -> None:
     if not CHANNELS_FILE.exists():
-        CHANNELS_FILE.write_text(DEFAULT_CHANNELS + "\n", encoding="utf-8")
+        bundled_channels = BUNDLE_DIR / "channels.txt"
+        seed = bundled_channels.read_text(encoding="utf-8", errors="ignore") if bundled_channels.exists() else DEFAULT_CHANNELS + "\n"
+        CHANNELS_FILE.write_text(seed, encoding="utf-8")
     if not ENV_FILE.exists():
         ENV_FILE.write_text(default_env_text(), encoding="utf-8")
 
@@ -478,7 +480,7 @@ CHECK_URL=http://www.gstatic.com/generate_204
 # Quality settings. Time is less important; higher attempts = stricter results.
 PING_ATTEMPTS=4
 MIN_SUCCESS=3
-PING_WORKERS=4
+PING_WORKERS=8
 TCP_FALLBACK_WORKERS=32
 SOCKET_TIMEOUT=8
 TCP_TIMEOUT=4
