@@ -83,7 +83,7 @@ private val DefaultChannels = """
 )
 once(
     "    val fetchWorkers: Int = 8,\n    val attempts: Int = 2,",
-    "    val fetchWorkers: Int = 12,\n    val pingWorkers: Int = 12,\n    val tcpTimeoutMs: Int = 2200,\n    val attempts: Int = 2,",
+    "    val fetchWorkers: Int = 16,\n    val pingWorkers: Int = 16,\n    val tcpTimeoutMs: Int = 2200,\n    val attempts: Int = 2,",
     "worker settings",
 )
 once(
@@ -254,8 +254,8 @@ regex(
     '''private suspend fun testAll(items: List<Candidate>, settings: SettingsState, update: (Int, Int, String) -> Unit): List<CheckResult> = coroutineScope {
     val filtered = items.filter { if (it.proxy) settings.checkProxies else settings.checkConfigs }
     val completed = AtomicInteger(0)
-    val xrayPool = Semaphore(settings.pingWorkers.coerceIn(1, 6))
-    val tcpPool = Semaphore((settings.pingWorkers * 2).coerceIn(2, 24))
+    val xrayPool = Semaphore(settings.pingWorkers.coerceIn(1, 8))
+    val tcpPool = Semaphore((settings.pingWorkers * 2).coerceIn(2, 32))
     filtered.map { item ->
         async(Dispatchers.IO) {
             val result = if (!item.proxy && item.xrayJson != null) {
