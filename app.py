@@ -20,7 +20,7 @@ from pathlib import Path
 from threading import Event
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QPointF
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QPointF, QSettings
 from PySide6.QtGui import QIcon, QPixmap, QFont, QAction, QPainter, QPen, QBrush, QColor, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 import engine
+import subscription_publisher
 
 APP_TITLE = "Dicode Config Checker"
 APP_VERSION = engine.VERSION
@@ -672,6 +673,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker: Optional[CheckerWorker] = None
+        self.app_settings = QSettings("Dicode", "DicodeConfigChecker")
         self.compact_nav = False
         self.sidebar_collapsed = False
         self._drag_position = None
@@ -992,6 +994,26 @@ class MainWindow(QMainWindow):
         output_grid.addWidget(opt, 1, 0, 1, 2)
         layout.addWidget(output_box)
 
+        subscription_box = section("ساب اختصاصی GitHub", "پس از پایان هر تست، sub.txt و proxy.txt سالم در ریپازیتوری عمومی خودت ساخته یا به روز می شوند.")
+        subscription_grid = subscription_box._grid  # type: ignore[attr-defined]
+        self.github_token = QLineEdit()
+        self.github_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.github_token.setPlaceholderText("ghp_... (Classic PAT با public_repo)")
+        self.github_token.setToolTip("برای ساخت اولین ریپازیتوری عمومی، یک Classic PAT با scope=public_repo بساز. توکن فقط در تنظیمات محلی همین دستگاه ذخیره و مستقیم به GitHub ارسال می شود.")
+        self.subscription_repo = QLineEdit()
+        self.subscription_repo.setReadOnly(True)
+        self.subscription_repo.setPlaceholderText("پس از اولین انتشار ساخته می شود")
+        self.subscription_sub_url = QLineEdit(); self.subscription_sub_url.setReadOnly(True)
+        self.subscription_proxy_url = QLineEdit(); self.subscription_proxy_url.setReadOnly(True)
+        self.btn_save_subscription = IconButton("ذخیره و فعال سازی ساب", "save", primary=True)
+        self.btn_save_subscription.clicked.connect(self.save_subscription_settings)
+        self.add_field(subscription_grid, 0, 0, "GitHub Classic PAT (public_repo)", self.github_token, 2)
+        self.add_field(subscription_grid, 1, 0, "ریپازیتوری عمومی ساب", self.subscription_repo, 2)
+        self.add_field(subscription_grid, 2, 0, "لینک sub.txt", self.subscription_sub_url, 2)
+        self.add_field(subscription_grid, 3, 0, "لینک proxy.txt", self.subscription_proxy_url, 2)
+        subscription_grid.addWidget(self.btn_save_subscription, 4, 0, 1, 2)
+        layout.addWidget(subscription_box)
+
         reset_wrap = QFrame()
         reset_wrap.setObjectName("ResetBox")
         reset_l = QHBoxLayout(reset_wrap)
@@ -1290,7 +1312,53 @@ class MainWindow(QMainWindow):
         self.check_configs.setChecked(bool(getattr(engine, "CHECK_V2RAY_CONFIGS", True)))
         self.check_proxies.setChecked(bool(getattr(engine, "CHECK_TELEGRAM_PROXIES", True)))
         self.fix_min_success()
+        self.load_subscription_settings()
         self.update_channel_count()
+
+    def load_subscription_settings(self) -> None:
+        token = str(self.app_settings.value("subscription/github_token", ""))
+        repo = str(self.app_settings.value("subscription/repository", ""))
+        self.github_token.setText(token)
+        self.subscription_repo.setText(repo)
+        self._refresh_subscription_urls(repo)
+
+    def _refresh_subscription_urls(self, repo: str) -> None:
+        if "/" not in repo:
+            self.subscription_sub_url.clear()
+            self.subscription_proxy_url.clear()
+            return
+        owner, name = repo.split("/", 1)
+        base = f"https://raw.githubusercontent.com/{owner}/{name}/refs/heads/main"
+        self.subscription_sub_url.setText(f"{base}/sub.txt")
+        self.subscription_proxy_url.setText(f"{base}/proxy.txt")
+
+    def save_subscription_settings(self) -> None:
+        token = self.github_token.text().strip()
+        if not token:
+            QMessageBox.warning(self, "توکن لازم است", "در GitHub از Settings > Developer settings > Personal access tokens > Tokens (classic)، یک توکن با scope «public_repo» بساز و اینجا وارد کن.")
+            return
+        self.app_settings.setValue("subscription/github_token", token)
+        self.app_settings.setValue("subscription/repository", self.subscription_repo.text().strip())
+        self.app_settings.sync()
+        self.append_log("OK ساب اختصاصی فعال شد؛ بعد از پایان تست بعدی، فایل ها در GitHub منتشر می شوند.")
+        QMessageBox.information(self, "ساب اختصاصی", "تنظیمات ذخیره شد. بعد از پایان تست، ریپازیتوری عمومی تصادفی با پایان DIC و لینک‌های raw برای sub.txt و proxy.txt ساخته می‌شوند.")
+
+    def publish_personal_subscription(self) -> None:
+        token = self.github_token.text().strip()
+        if not token:
+            return
+        try:
+            sub_text = engine.SUB_FILE.read_text(encoding="utf-8") if engine.SUB_FILE.exists() else ""
+            proxy_text = engine.PROXY_FILE.read_text(encoding="utf-8") if engine.PROXY_FILE.exists() else ""
+            repo = subscription_publisher.publish(token, self.subscription_repo.text().strip(), sub_text, proxy_text)
+            self.subscription_repo.setText(repo.ref)
+            self.app_settings.setValue("subscription/repository", repo.ref)
+            self.app_settings.sync()
+            self._refresh_subscription_urls(repo.ref)
+            self.append_log(f"OK ساب اختصاصی به روز شد: {repo.ref}")
+        except Exception as exc:
+            self.append_log(f"WARN انتشار ساب اختصاصی ناموفق: {exc}")
+            QMessageBox.warning(self, "ساب اختصاصی", f"خروجی محلی ساخته شد، اما انتشار GitHub ناموفق بود:\n{exc}")
 
     def load_default_channels(self) -> None:
         p1, p2 = self.split_priority_from_channels(engine.DEFAULT_CHANNELS.strip())
@@ -1511,6 +1579,7 @@ class MainWindow(QMainWindow):
             engine.cleanup_xray_processes()
         except Exception:
             pass
+        self.publish_personal_subscription()
         stats = report.get("stats", {})
         QMessageBox.information(
             self,
