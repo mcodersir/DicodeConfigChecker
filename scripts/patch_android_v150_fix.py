@@ -14,7 +14,7 @@ def replace_once(old: str, new: str, name: str) -> None:
 
 preview_helper = r'''private fun isUsableTelegramPreview(html: String): Boolean {
     val lower = html.lowercase()
-    return html.isNotBlank() && (lower.contains("tgme_widget_message") || lower.contains("tgme_channel_info") || linkRegex.containsMatchIn(html))
+    return html.isNotBlank() && (lower.contains("tgme_widget_message") || lower.contains("tgme_channel_info"))
 }
 
 '''
