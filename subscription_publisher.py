@@ -27,6 +27,14 @@ class SubscriptionRepository:
         return f"https://raw.githubusercontent.com/{self.owner}/{self.name}/refs/heads/main/{filename}"
 
 
+@dataclass(frozen=True)
+class PublishResult:
+    repository: SubscriptionRepository
+    repository_created: bool
+    sub_changed: bool
+    proxy_changed: bool
+
+
 def _request_once(token: str, method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(
@@ -78,11 +86,15 @@ def _random_name() -> str:
     return f"dicode-{suffix}-DIC"
 
 
-def _upsert_file(token: str, repo: SubscriptionRepository, filename: str, text: str) -> None:
+def _upsert_file(token: str, repo: SubscriptionRepository, filename: str, text: str) -> bool:
     path = f"/repos/{repo.ref}/contents/{filename}"
     sha = None
     try:
-        sha = _request(token, "GET", path).get("sha")
+        current = _request(token, "GET", path)
+        sha = current.get("sha")
+        encoded = str(current.get("content") or "").replace("\n", "")
+        if encoded and base64.b64decode(encoded).decode("utf-8", errors="replace") == text:
+            return False
     except RuntimeError as error:
         if "GitHub API 404" not in str(error):
             raise
@@ -94,9 +106,10 @@ def _upsert_file(token: str, repo: SubscriptionRepository, filename: str, text: 
     if sha:
         payload["sha"] = sha
     _request(token, "PUT", path, payload)
+    return True
 
 
-def publish(token: str, existing_ref: str, sub_text: str, proxy_text: str) -> SubscriptionRepository:
+def ensure_repository(token: str, existing_ref: str) -> tuple[SubscriptionRepository, bool]:
     if not token or not token.strip():
         raise ValueError("توکن GitHub وارد نشده است.")
     profile = _request(token, "GET", "/user")
@@ -104,7 +117,7 @@ def publish(token: str, existing_ref: str, sub_text: str, proxy_text: str) -> Su
     if not owner:
         raise RuntimeError("هویت GitHub از روی توکن خوانده نشد.")
     if existing_ref and "/" in existing_ref:
-        repo = SubscriptionRepository(*existing_ref.split("/", 1))
+        return SubscriptionRepository(*existing_ref.split("/", 1)), False
     else:
         repo = SubscriptionRepository(owner, _random_name())
         created = _request(token, "POST", "/user/repos", {
@@ -116,7 +129,11 @@ def publish(token: str, existing_ref: str, sub_text: str, proxy_text: str) -> Su
             "has_projects": False,
             "has_wiki": False,
         })
-        repo = SubscriptionRepository(str(created["owner"]["login"]), str(created["name"]))
-    _upsert_file(token, repo, "sub.txt", sub_text)
-    _upsert_file(token, repo, "proxy.txt", proxy_text)
-    return repo
+        return SubscriptionRepository(str(created["owner"]["login"]), str(created["name"])), True
+
+
+def publish(token: str, existing_ref: str, sub_text: str, proxy_text: str) -> PublishResult:
+    repo, repository_created = ensure_repository(token, existing_ref)
+    sub_changed = _upsert_file(token, repo, "sub.txt", sub_text)
+    proxy_changed = _upsert_file(token, repo, "proxy.txt", proxy_text)
+    return PublishResult(repo, repository_created, sub_changed, proxy_changed)
