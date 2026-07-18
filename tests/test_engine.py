@@ -74,3 +74,21 @@ def test_preview_uses_telegram_me_only_after_t_me_fails() -> None:
     assert result["ok"] is True
     assert result["preview_host"] == "telegram.me"
     assert calls == ["https://t.me/s/example_channel", "https://telegram.me/s/example_channel"]
+
+
+def test_preview_uses_telegram_me_when_t_me_returns_a_generic_200_page() -> None:
+    calls: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        calls.append(url)
+        if "t.me/" in url and "telegram.me" not in url:
+            return "<html><title>Temporary error</title></html>"
+        return '<div class="tgme_widget_message">vless://id@example.com:443?security=tls</div>'
+
+    with patch.object(engine, "fetch_url", fake_fetch):
+        result = engine.fetch_channel("example_channel")
+
+    assert result["ok"] is True
+    assert result["preview_host"] == "telegram.me"
+    assert len(result["configs"]) == 1
+    assert calls == ["https://t.me/s/example_channel", "https://telegram.me/s/example_channel"]
