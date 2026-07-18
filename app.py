@@ -705,7 +705,9 @@ class MainWindow(QMainWindow):
         self.apply_style()
         self.update_channel_count()
         QTimer.singleShot(80, self.apply_responsive_mode)
-        if bool(self.app_settings.value("subscription/pending_publish", False)):
+        if bool(self.app_settings.value("subscription/pending_repository", False)):
+            QTimer.singleShot(3000, self.create_subscription_repository)
+        elif bool(self.app_settings.value("subscription/pending_publish", False)):
             QTimer.singleShot(3000, self.publish_personal_subscription)
 
     def build_ui(self) -> None:
@@ -1043,13 +1045,16 @@ class MainWindow(QMainWindow):
             return frame
         self.btn_save_subscription = IconButton("ذخیره و فعال سازی ساب", "save", primary=True)
         self.btn_save_subscription.clicked.connect(self.save_subscription_settings)
+        self.btn_create_subscription_repo = IconButton("ساخت / اتصال ریپازیتوری ساب", "folder")
+        self.btn_create_subscription_repo.clicked.connect(self.create_subscription_repository)
         subscription_grid.addWidget(subscription_steps, 0, 0, 1, 2)
         subscription_grid.addWidget(self.btn_open_token_page, 1, 0, 1, 2)
         self.add_field(subscription_grid, 2, 0, "۲. GitHub Classic PAT (public_repo)", self.github_token, 2)
         subscription_grid.addWidget(self.btn_save_subscription, 3, 0, 1, 2)
-        self.add_field(subscription_grid, 4, 0, "ریپازیتوری عمومی ساب", copy_field(self.subscription_repo, "لینک ریپازیتوری"), 2)
-        self.add_field(subscription_grid, 5, 0, "لینک sub.txt", copy_field(self.subscription_sub_url, "لینک sub.txt"), 2)
-        self.add_field(subscription_grid, 6, 0, "لینک proxy.txt", copy_field(self.subscription_proxy_url, "لینک proxy.txt"), 2)
+        subscription_grid.addWidget(self.btn_create_subscription_repo, 4, 0, 1, 2)
+        self.add_field(subscription_grid, 5, 0, "ریپازیتوری عمومی ساب", copy_field(self.subscription_repo, "لینک ریپازیتوری"), 2)
+        self.add_field(subscription_grid, 6, 0, "لینک sub.txt", copy_field(self.subscription_sub_url, "لینک sub.txt"), 2)
+        self.add_field(subscription_grid, 7, 0, "لینک proxy.txt", copy_field(self.subscription_proxy_url, "لینک proxy.txt"), 2)
         layout.addWidget(subscription_box)
 
         reset_wrap = QFrame()
@@ -1182,6 +1187,7 @@ class MainWindow(QMainWindow):
         tb.setContentsMargins(14, 12, 14, 12)
         tb.setSpacing(10)
         copy_btn = IconButton("کپی خروجی", "copy", primary=True)
+        publish_btn = IconButton("به‌روزرسانی ساب GitHub", "save")
         reload_btn = IconButton("بارگذاری دوباره", "reset")
         open_btn = IconButton("پوشه خروجی", "folder")
         counter = QLabel("0 خط")
@@ -1189,6 +1195,7 @@ class MainWindow(QMainWindow):
         counter.setAlignment(Qt.AlignCenter)
         tb.addWidget(open_btn)
         tb.addWidget(reload_btn)
+        tb.addWidget(publish_btn)
         tb.addWidget(copy_btn)
         tb.addStretch(1)
         tb.addWidget(counter)
@@ -1216,6 +1223,7 @@ class MainWindow(QMainWindow):
             self.proxy_count_label = counter
             copy_btn.clicked.connect(lambda: self.copy_result_box("proxies"))
         reload_btn.clicked.connect(self.refresh_result_tabs)
+        publish_btn.clicked.connect(lambda: self.publish_personal_subscription(kind, manual=True))
         open_btn.clicked.connect(self.open_output_folder)
         return page
 
@@ -1379,7 +1387,7 @@ class MainWindow(QMainWindow):
         self.app_settings.setValue("subscription/repository", self.subscription_repo.text().strip())
         self.app_settings.sync()
         self.append_log("OK ساب اختصاصی فعال شد؛ بعد از پایان تست بعدی، فایل ها در GitHub منتشر می شوند.")
-        QMessageBox.information(self, "ساب اختصاصی", "تنظیمات ذخیره شد. بعد از پایان تست، ریپازیتوری عمومی تصادفی با پایان DIC و لینک‌های raw برای sub.txt و proxy.txt ساخته می‌شوند.")
+        QMessageBox.information(self, "ساب اختصاصی", "توکن ذخیره شد. حالا روی «ساخت / اتصال ریپازیتوری ساب» بزن تا همین الآن ریپو و لینک‌های raw آماده شوند.")
 
     def open_github_token_page(self) -> None:
         webbrowser.open(GITHUB_TOKEN_CREATE_URL)
@@ -1391,7 +1399,31 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText(value.strip())
         self.append_log(f"OK {label} کپی شد.")
 
-    def publish_personal_subscription(self) -> None:
+    def create_subscription_repository(self) -> None:
+        self._subscription_retry_scheduled = False
+        token = self.github_token.text().strip()
+        if not token:
+            QMessageBox.warning(self, "توکن لازم است", "ابتدا توکن GitHub را وارد و ذخیره کن.")
+            return
+        try:
+            repo, created = subscription_publisher.ensure_repository(token, self.subscription_repo.text().strip())
+            self.subscription_repo.setText(repo.ref)
+            self.app_settings.setValue("subscription/repository", repo.ref)
+            self.app_settings.sync()
+            self._refresh_subscription_urls(repo.ref)
+            message = "ریپازیتوری عمومی ساخته و لینک‌ها آماده شد." if created else "این ریپازیتوری قبلاً آماده بوده و لینک‌ها متصل شدند."
+            self.append_log(f"OK {message} {repo.ref}")
+            QMessageBox.information(self, "ساب اختصاصی آماده است", message)
+        except Exception as exc:
+            self.app_settings.setValue("subscription/pending_repository", True)
+            self.app_settings.sync()
+            self.append_log(f"WARN ساخت ریپازیتوری در صف تلاش مجدد: {exc}")
+            QMessageBox.information(self, "ساب اختصاصی", "اتصال GitHub فعلاً در دسترس نیست؛ ساخت ریپازیتوری در صف تلاش مجدد قرار گرفت.")
+            if not self._subscription_retry_scheduled:
+                self._subscription_retry_scheduled = True
+                QTimer.singleShot(30_000, self.create_subscription_repository)
+
+    def publish_personal_subscription(self, requested_kind: str | None = None, manual: bool = False) -> None:
         # A scheduled retry has now started; permit it to schedule the next
         # retry if DNS is still unavailable.
         self._subscription_retry_scheduled = False
@@ -1401,13 +1433,23 @@ class MainWindow(QMainWindow):
         try:
             sub_text = engine.SUB_FILE.read_text(encoding="utf-8") if engine.SUB_FILE.exists() else ""
             proxy_text = engine.PROXY_FILE.read_text(encoding="utf-8") if engine.PROXY_FILE.exists() else ""
-            repo = subscription_publisher.publish(token, self.subscription_repo.text().strip(), sub_text, proxy_text)
+            result = subscription_publisher.publish(token, self.subscription_repo.text().strip(), sub_text, proxy_text)
+            repo = result.repository
             self.subscription_repo.setText(repo.ref)
             self.app_settings.setValue("subscription/repository", repo.ref)
             self.app_settings.setValue("subscription/pending_publish", False)
+            self.app_settings.setValue("subscription/pending_repository", False)
             self.app_settings.sync()
             self._refresh_subscription_urls(repo.ref)
-            self.append_log(f"OK ساب اختصاصی به روز شد: {repo.ref}")
+            if requested_kind == "configs":
+                state = "منتشر شد" if result.sub_changed else "تکراری است؛ همین متن قبلاً روی ریپو بوده"
+            elif requested_kind == "proxies":
+                state = "منتشر شد" if result.proxy_changed else "تکراری است؛ همین متن قبلاً روی ریپو بوده"
+            else:
+                state = "به‌روزرسانی شد" if (result.sub_changed or result.proxy_changed) else "تکراری است؛ هر دو فایل قبلاً همین محتوا را داشتند"
+            self.append_log(f"OK ساب اختصاصی {state}: {repo.ref}")
+            if manual:
+                QMessageBox.information(self, "انتشار ساب", state)
             self._subscription_retry_scheduled = False
         except Exception as exc:
             self.append_log(f"WARN انتشار ساب اختصاصی ناموفق: {exc}")
@@ -1417,6 +1459,8 @@ class MainWindow(QMainWindow):
                 self._subscription_retry_scheduled = True
                 QTimer.singleShot(30_000, self.publish_personal_subscription)
                 self.append_log("INFO انتشار ساب در صف تلاش مجدد است؛ با برقرارشدن DNS/اینترنت خودکار انجام می‌شود.")
+            if manual:
+                QMessageBox.information(self, "انتشار ساب", "اتصال GitHub فعلاً در دسترس نیست؛ انتشار در صف تلاش مجدد قرار گرفت.")
 
     def load_default_channels(self) -> None:
         p1, p2 = self.split_priority_from_channels(engine.DEFAULT_CHANNELS.strip())
