@@ -133,10 +133,15 @@ class CheckerWorker(QThread):
             engine.ensure_files()
             engine.clear_old_outputs()
 
-            self.stage_text.emit("آماده‌سازی Xray")
-            self.progress.emit(0, 100)
-            self.emit_log("اتصال فعلی را روشن نگه دارید؛ آماده‌سازی Xray شروع شد.")
-            xray_path = engine.ensure_xray_binary()
+            # Collection must visibly start right after the user clicks the
+            # first action.  Xray preparation can take a while on restricted
+            # networks, so do it concurrently while Telegram previews are read.
+            self.stage_text.emit("دریافت از تلگرام")
+            self.emit_log("دریافت کانال‌ها فوراً شروع شد؛ Xray هم در پس‌زمینه آماده می‌شود.")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as prep:
+                xray_future = prep.submit(engine.ensure_xray_binary)
+                self.collect_stage1()
+                xray_path = xray_future.result()
             if xray_path:
                 self.emit_log(f"Xray آماده است: {xray_path}")
             elif self.settings.test_mode == "xray":
@@ -147,7 +152,6 @@ class CheckerWorker(QThread):
             if self._abort_requested:
                 return
 
-            self.collect_stage1()
             if self._abort_requested:
                 return
 
@@ -1482,6 +1486,10 @@ class MainWindow(QMainWindow):
             return
         if not self.check_configs.isChecked() and not self.check_proxies.isChecked():
             QMessageBox.warning(self, "خروجی انتخاب نشده", "حداقل یکی از خروجی‌ها را روشن کن: sub.txt یا proxy.txt")
+            return
+        priority_one, priority_two = self.priority_channel_lists()
+        if not priority_one and not priority_two:
+            QMessageBox.warning(self, "فهرست کانال خالی است", "هیچ کانال معتبری در تنظیمات نیست. ابتدا از بخش کانال‌ها «لیست پیش‌فرض» را بارگذاری و ذخیره کن.")
             return
         self.save_channels_from_editor()
         self.log_box.clear()
