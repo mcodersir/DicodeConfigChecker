@@ -548,6 +548,14 @@ def fetch_url(url: str) -> str:
         return data.decode(enc, errors="ignore")
 
 
+def is_usable_telegram_preview(page: str) -> bool:
+    """Reject generic/block pages returned as HTTP 200 by a broken t.me route."""
+    if not page or not page.strip():
+        return False
+    lower = page.lower()
+    return "tgme_widget_message" in lower or "tgme_channel_info" in lower or bool(extract_configs(page))
+
+
 def fetch_channel(channel: str) -> dict[str, Any]:
     limit = MAIN_CHANNEL_LIMIT if channel.lower() in MAIN_CHANNELS else PER_CHANNEL_LIMIT
     started = time.time()
@@ -557,10 +565,14 @@ def fetch_channel(channel: str) -> dict[str, Any]:
         preview_host = "t.me"
         try:
             page = fetch_url(f"https://t.me/s/{channel}")
+            if not is_usable_telegram_preview(page):
+                raise RuntimeError("t.me returned an unusable preview page")
         except Exception as primary_error:
             preview_host = "telegram.me"
             try:
                 page = fetch_url(f"https://telegram.me/s/{channel}")
+                if not is_usable_telegram_preview(page):
+                    raise RuntimeError("telegram.me returned an unusable preview page")
             except Exception as fallback_error:
                 raise RuntimeError(
                     f"t.me unavailable ({primary_error}); telegram.me also failed ({fallback_error})"
