@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate desktop source and Android patches
-        run: python -m py_compile engine.py app.py desktop.py subscription_publisher.py scripts/patch_android_ui.py scripts/patch_android_v120.py scripts/patch_android_v120_imports.py scripts/patch_android_v130.py scripts/patch_android_v140.py scripts/patch_android_v141.py scripts/patch_android_v149.py scripts/patch_android_v150.py scripts/patch_android_v150_fix.py
+        run: python -m py_compile engine.py app.py desktop.py subscription_publisher.py scripts/patch_android_ui.py scripts/patch_android_v120.py scripts/patch_android_v120_imports.py scripts/patch_android_v130.py scripts/patch_android_v140.py scripts/patch_android_v141.py scripts/patch_android_v149.py scripts/patch_android_v150.py scripts/patch_android_v150_fix.py scripts/patch_android_v150_copy.py
       - name: Run parser regression tests
         run: |
           python -m pip install --upgrade pip pytest
@@ -129,6 +129,7 @@ jobs:
           python scripts/patch_android_v149.py
           python scripts/patch_android_v150.py
           python scripts/patch_android_v150_fix.py
+          python scripts/patch_android_v150_copy.py
           gradle -p android :app:assembleDebug --stacktrace
           cp android/app/build/outputs/apk/debug/app-debug.apk DicodeConfigChecker-v${VERSION}-android.apk
       - uses: actions/upload-artifact@v4
