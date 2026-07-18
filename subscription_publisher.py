@@ -5,6 +5,7 @@ import base64
 import json
 import random
 import string
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ class SubscriptionRepository:
         return f"https://raw.githubusercontent.com/{self.owner}/{self.name}/refs/heads/main/{filename}"
 
 
-def _request(token: str, method: str, path: str, body: dict | None = None) -> dict:
+def _request_once(token: str, method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(
         f"{API}{path}", data=data, method=method,
@@ -44,6 +45,32 @@ def _request(token: str, method: str, path: str, body: dict | None = None) -> di
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="ignore")
         raise RuntimeError(f"GitHub API {error.code}: {detail[:220]}") from error
+
+
+def _request(token: str, method: str, path: str, body: dict | None = None) -> dict:
+    """Use bounded retries for DNS, transient TLS, and short GitHub outages."""
+    delays = (1.0, 2.0, 4.0, 8.0)
+    last_error: Exception | None = None
+    for index, delay in enumerate(delays):
+        try:
+            return _request_once(token, method, path, body)
+        except urllib.error.URLError as error:
+            last_error = error
+        except OSError as error:
+            last_error = error
+        except RuntimeError as error:
+            # Authentication and validation errors are actionable and must not
+            # be retried; 5xx / rate-limit responses can be transient.
+            message = str(error)
+            if not any(f"GitHub API {code}" in message for code in (429, 500, 502, 503, 504)):
+                raise
+            last_error = error
+        if index < len(delays) - 1:
+            time.sleep(delay)
+    raise RuntimeError(
+        "اتصال به GitHub موقتاً در دسترس نیست؛ برنامه انتشار را خودکار دوباره تلاش می‌کند. "
+        f"({last_error})"
+    ) from last_error
 
 
 def _random_name() -> str:
