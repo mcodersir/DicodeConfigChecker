@@ -583,6 +583,15 @@ class IconButton(QPushButton):
         self.setMinimumHeight(42)
 
 
+class CopyLineEdit(QLineEdit):
+    """A read-only field that copies its value when the user taps the text."""
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if self.isReadOnly() and self.text().strip() and event.button() == Qt.LeftButton:
+            QApplication.clipboard().setText(self.text().strip())
+        super().mousePressEvent(event)
+
+
 class HomeStepCard(QFrame):
     """A compact stateful operation card for the home screen."""
 
@@ -679,6 +688,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.worker: Optional[CheckerWorker] = None
         self.app_settings = QSettings("Dicode", "DicodeConfigChecker")
+        self._subscription_retry_scheduled = False
         self.compact_nav = False
         self.sidebar_collapsed = False
         self._drag_position = None
@@ -695,6 +705,8 @@ class MainWindow(QMainWindow):
         self.apply_style()
         self.update_channel_count()
         QTimer.singleShot(80, self.apply_responsive_mode)
+        if bool(self.app_settings.value("subscription/pending_publish", False)):
+            QTimer.singleShot(3000, self.publish_personal_subscription)
 
     def build_ui(self) -> None:
         root = QWidget()
@@ -1011,20 +1023,33 @@ class MainWindow(QMainWindow):
         self.github_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.github_token.setPlaceholderText("ghp_... (Classic PAT با public_repo)")
         self.github_token.setToolTip("برای ساخت اولین ریپازیتوری عمومی، یک Classic PAT با scope=public_repo بساز. توکن فقط در تنظیمات محلی همین دستگاه ذخیره و مستقیم به GitHub ارسال می شود.")
-        self.subscription_repo = QLineEdit()
+        self.subscription_repo = CopyLineEdit()
         self.subscription_repo.setReadOnly(True)
         self.subscription_repo.setPlaceholderText("پس از اولین انتشار ساخته می شود")
-        self.subscription_sub_url = QLineEdit(); self.subscription_sub_url.setReadOnly(True)
-        self.subscription_proxy_url = QLineEdit(); self.subscription_proxy_url.setReadOnly(True)
+        self.subscription_sub_url = CopyLineEdit(); self.subscription_sub_url.setReadOnly(True)
+        self.subscription_proxy_url = CopyLineEdit(); self.subscription_proxy_url.setReadOnly(True)
+
+        def copy_field(line: QLineEdit, label: str) -> QFrame:
+            frame = QFrame()
+            row = QHBoxLayout(frame)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            button = IconButton("", "copy")
+            button.setToolTip(f"کپی {label}")
+            button.setFixedSize(42, 42)
+            button.clicked.connect(lambda: self.copy_subscription_value(line.text(), label))
+            row.addWidget(line, 1)
+            row.addWidget(button)
+            return frame
         self.btn_save_subscription = IconButton("ذخیره و فعال سازی ساب", "save", primary=True)
         self.btn_save_subscription.clicked.connect(self.save_subscription_settings)
         subscription_grid.addWidget(subscription_steps, 0, 0, 1, 2)
         subscription_grid.addWidget(self.btn_open_token_page, 1, 0, 1, 2)
         self.add_field(subscription_grid, 2, 0, "۲. GitHub Classic PAT (public_repo)", self.github_token, 2)
         subscription_grid.addWidget(self.btn_save_subscription, 3, 0, 1, 2)
-        self.add_field(subscription_grid, 4, 0, "ریپازیتوری عمومی ساب", self.subscription_repo, 2)
-        self.add_field(subscription_grid, 5, 0, "لینک sub.txt", self.subscription_sub_url, 2)
-        self.add_field(subscription_grid, 6, 0, "لینک proxy.txt", self.subscription_proxy_url, 2)
+        self.add_field(subscription_grid, 4, 0, "ریپازیتوری عمومی ساب", copy_field(self.subscription_repo, "لینک ریپازیتوری"), 2)
+        self.add_field(subscription_grid, 5, 0, "لینک sub.txt", copy_field(self.subscription_sub_url, "لینک sub.txt"), 2)
+        self.add_field(subscription_grid, 6, 0, "لینک proxy.txt", copy_field(self.subscription_proxy_url, "لینک proxy.txt"), 2)
         layout.addWidget(subscription_box)
 
         reset_wrap = QFrame()
@@ -1360,7 +1385,16 @@ class MainWindow(QMainWindow):
         webbrowser.open(GITHUB_TOKEN_CREATE_URL)
         self.append_log("INFO صفحه ساخت GitHub token باز شد؛ پس از ساخت، توکن را در مرحله ۲ تنظیمات بچسبان.")
 
+    def copy_subscription_value(self, value: str, label: str) -> None:
+        if not value.strip():
+            return
+        QApplication.clipboard().setText(value.strip())
+        self.append_log(f"OK {label} کپی شد.")
+
     def publish_personal_subscription(self) -> None:
+        # A scheduled retry has now started; permit it to schedule the next
+        # retry if DNS is still unavailable.
+        self._subscription_retry_scheduled = False
         token = self.github_token.text().strip()
         if not token:
             return
@@ -1370,12 +1404,19 @@ class MainWindow(QMainWindow):
             repo = subscription_publisher.publish(token, self.subscription_repo.text().strip(), sub_text, proxy_text)
             self.subscription_repo.setText(repo.ref)
             self.app_settings.setValue("subscription/repository", repo.ref)
+            self.app_settings.setValue("subscription/pending_publish", False)
             self.app_settings.sync()
             self._refresh_subscription_urls(repo.ref)
             self.append_log(f"OK ساب اختصاصی به روز شد: {repo.ref}")
+            self._subscription_retry_scheduled = False
         except Exception as exc:
             self.append_log(f"WARN انتشار ساب اختصاصی ناموفق: {exc}")
-            QMessageBox.warning(self, "ساب اختصاصی", f"خروجی محلی ساخته شد، اما انتشار GitHub ناموفق بود:\n{exc}")
+            self.app_settings.setValue("subscription/pending_publish", True)
+            self.app_settings.sync()
+            if not self._subscription_retry_scheduled:
+                self._subscription_retry_scheduled = True
+                QTimer.singleShot(30_000, self.publish_personal_subscription)
+                self.append_log("INFO انتشار ساب در صف تلاش مجدد است؛ با برقرارشدن DNS/اینترنت خودکار انجام می‌شود.")
 
     def load_default_channels(self) -> None:
         p1, p2 = self.split_priority_from_channels(engine.DEFAULT_CHANNELS.strip())
