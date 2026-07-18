@@ -142,13 +142,13 @@ replace_once(
     val scope = rememberCoroutineScope()''',
     "output publish scope",
 )
-replace_once(
-    '''                    Button(onClick = { clipboard.setText(AnnotatedString(lines.joinToString("\\n"))); Toast.makeText(context, "${lines.size} مورد کپی شد", Toast.LENGTH_SHORT).show() }, enabled = lines.isNotEmpty(), modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)) { Text("کپی همه", fontWeight = FontWeight.Bold) }
-                    FilledTonalButton(onClick = { file?.let { share(context, it) } }, enabled = file != null, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Card2, contentColor = Text)) { Text("اشتراک فایل", fontWeight = FontWeight.Bold) }
-                }
-            }''',
-    '''                    Button(onClick = { clipboard.setText(AnnotatedString(lines.joinToString("\\n"))); Toast.makeText(context, "${lines.size} مورد کپی شد", Toast.LENGTH_SHORT).show() }, enabled = lines.isNotEmpty(), modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)) { Text("کپی همه", fontWeight = FontWeight.Bold) }
-                    FilledTonalButton(onClick = { file?.let { share(context, it) } }, enabled = file != null, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Card2, contentColor = Text)) { Text("اشتراک فایل", fontWeight = FontWeight.Bold) }
+replace_regex(
+    r'''        item \{\n            Panel \{\n                Row\(Modifier\.fillMaxWidth\(\), horizontalArrangement = Arrangement\.spacedBy\(8\.dp\)\) \{.*?Text\("اشتراک فایل", fontWeight = FontWeight\.Bold\) \}\n                \}\n            \}\n        \}\n(?=        itemsIndexed)''',
+    '''        item {
+            Panel {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { clipboard.setText(AnnotatedString(lines.joinToString("\\n"))); Toast.makeText(context, "${lines.size} مورد کپی شد", Toast.LENGTH_SHORT).show() }, enabled = lines.isNotEmpty(), modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)) { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text("کپی همه", fontWeight = FontWeight.Bold) }
+                    FilledTonalButton(onClick = { file?.let { share(context, it) } }, enabled = file != null, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Card2, contentColor = Text)) { Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text("اشتراک فایل", fontWeight = FontWeight.Bold) }
                 }
                 OutlinedButton(onClick = {
                     scope.launch {
@@ -160,7 +160,9 @@ replace_once(
                             .onFailure { Toast.makeText(context, "اتصال GitHub ناموفق بود؛ دوباره امتحان کن", Toast.LENGTH_LONG).show() }
                     }
                 }, enabled = file != null, modifier = Modifier.fillMaxWidth()) { Text(if (isProxy) "به‌روزرسانی ساب پروکسی" else "به‌روزرسانی ساب کانفیگ") }
-            }''',
+            }
+        }
+''',
     "manual output publish button",
 )
 
