@@ -1,0 +1,43 @@
+name: Verify Dicode Config Checker v1.5.1 release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-v1.5.1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.head_ref == 'agent/publish-v1.5.1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify release URL, target and assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: '1.5.1'
+          EXPECTED_TARGET: 'c7b0273e3264df5be689f382d5bbf724bc84b358'
+        run: |
+          set -euo pipefail
+
+          gh release view "v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json url,tagName,targetCommitish,publishedAt,assets \
+            --jq '{url, tagName, targetCommitish, publishedAt, assets: [.assets[].name]}'
+
+          test "$(gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$EXPECTED_TARGET"
+
+          expected=$(cat <<'EOF' | sort
+          DicodeConfigChecker-v1.5.1-android.apk
+          DicodeConfigChecker-v1.5.1-linux-x86_64.tar.gz
+          DicodeConfigChecker-v1.5.1-macos-arm64.zip
+          DicodeConfigChecker-v1.5.1-macos-x86_64.zip
+          DicodeConfigChecker-v1.5.1-source.zip
+          DicodeConfigChecker-v1.5.1-windows-x64.exe
+          SHA256SUMS.txt
+          EOF
+          )
+          actual=$(gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort)
+          diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual")
