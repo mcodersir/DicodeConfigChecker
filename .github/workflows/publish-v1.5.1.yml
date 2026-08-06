@@ -1,0 +1,78 @@
+name: Publish validated Dicode Config Checker v1.5.1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.5.1.yml'
+      - '.github/release-v1.5.1.retry'
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-dicode-v1.5.1
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.head_ref == 'agent/publish-v1.5.1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download validated artifacts and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: '31115600514'
+          RELEASE_TARGET: 'c7b0273e3264df5be689f382d5bbf724bc84b358'
+          VERSION: '1.5.1'
+        run: |
+          set -euo pipefail
+          mkdir -p release
+
+          for artifact in windows linux macos-arm64 macos-x86_64 android; do
+            gh run download "$SOURCE_RUN_ID" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name "$artifact" \
+              --dir release
+          done
+
+          gh api "repos/$GITHUB_REPOSITORY/zipball/$RELEASE_TARGET" \
+            > "release/DicodeConfigChecker-v${VERSION}-source.zip"
+
+          gh api "repos/$GITHUB_REPOSITORY/contents/RELEASE_NOTES_1.5.1.md?ref=$RELEASE_TARGET" \
+            --jq '.content' | tr -d '\n' | base64 --decode > RELEASE_NOTES_1.5.1.md
+
+          expected=(
+            "DicodeConfigChecker-v${VERSION}-windows-x64.exe"
+            "DicodeConfigChecker-v${VERSION}-linux-x86_64.tar.gz"
+            "DicodeConfigChecker-v${VERSION}-macos-arm64.zip"
+            "DicodeConfigChecker-v${VERSION}-macos-x86_64.zip"
+            "DicodeConfigChecker-v${VERSION}-android.apk"
+            "DicodeConfigChecker-v${VERSION}-source.zip"
+          )
+          for file in "${expected[@]}"; do
+            test -s "release/$file"
+          done
+
+          (
+            cd release
+            sha256sum DicodeConfigChecker-* > SHA256SUMS.txt
+          )
+
+          gh release delete "v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --cleanup-tag \
+            --yes 2>/dev/null || true
+
+          gh release create "v${VERSION}" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Dicode Config Checker v${VERSION}" \
+            --notes-file RELEASE_NOTES_1.5.1.md \
+            --latest \
+            --target "$RELEASE_TARGET"
+
+          gh release view "v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json url,tagName,isLatest,assets \
+            --jq '{url, tagName, isLatest, assets: [.assets[].name]}'
