@@ -20,10 +20,12 @@ add_import(
     "import androidx.compose.ui.platform.LocalLayoutDirection\nimport androidx.compose.ui.text.font.Font\nimport androidx.compose.ui.text.font.FontFamily\nimport androidx.compose.ui.unit.LayoutDirection",
 )
 
-marker = "private val Bad = Color(0xFFEF4444)"
-font_block = '''private val Bad = Color(0xFFEF4444)
+color_marker = re.search(r"private val Bad = Color\(0x[0-9A-Fa-f]{8}\)", text)
+if color_marker is None:
+    raise SystemExit("color marker missing")
+font_block = f'''{color_marker.group(0)}
 private val VazirmatnFamily = FontFamily(Font(R.font.vazirmatn_regular))
-private val DicodeTypography = Typography().let { base ->
+private val DicodeTypography = Typography().let {{ base ->
     Typography(
         displayLarge = base.displayLarge.copy(fontFamily = VazirmatnFamily),
         displayMedium = base.displayMedium.copy(fontFamily = VazirmatnFamily),
@@ -41,11 +43,9 @@ private val DicodeTypography = Typography().let { base ->
         labelMedium = base.labelMedium.copy(fontFamily = VazirmatnFamily),
         labelSmall = base.labelSmall.copy(fontFamily = VazirmatnFamily),
     )
-}'''
+}}'''
 if "VazirmatnFamily" not in text:
-    if marker not in text:
-        raise SystemExit("color marker missing")
-    text = text.replace(marker, font_block, 1)
+    text = text.replace(color_marker.group(0), font_block, 1)
 
 old = "MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Card)) {"
 new = '''CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
