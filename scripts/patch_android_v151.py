@@ -17,29 +17,31 @@ def add_import(anchor: str, new_imports: str) -> None:
 text = re.sub(r'private const val VERSION = "[^"]+"', 'private const val VERSION = "1.5.1"', text, count=1)
 add_import(
     "import androidx.compose.ui.platform.LocalContext",
-    "import androidx.compose.ui.platform.LocalLayoutDirection\nimport androidx.compose.ui.text.font.Font\nimport androidx.compose.ui.text.font.FontFamily\nimport androidx.compose.ui.text.platform.Typeface\nimport androidx.compose.ui.unit.LayoutDirection",
+    "import androidx.compose.ui.platform.LocalLayoutDirection\nimport androidx.compose.ui.text.font.Font\nimport androidx.compose.ui.text.font.FontFamily\nimport androidx.compose.ui.unit.LayoutDirection",
 )
 
 marker = "private val Bad = Color(0xFFEF4444)"
 font_block = '''private val Bad = Color(0xFFEF4444)
 private val VazirmatnFamily = FontFamily(Font(R.font.vazirmatn_regular))
-private val DicodeTypography = Typography(
-    displayLarge = Typography().displayLarge.copy(fontFamily = VazirmatnFamily),
-    displayMedium = Typography().displayMedium.copy(fontFamily = VazirmatnFamily),
-    displaySmall = Typography().displaySmall.copy(fontFamily = VazirmatnFamily),
-    headlineLarge = Typography().headlineLarge.copy(fontFamily = VazirmatnFamily),
-    headlineMedium = Typography().headlineMedium.copy(fontFamily = VazirmatnFamily),
-    headlineSmall = Typography().headlineSmall.copy(fontFamily = VazirmatnFamily),
-    titleLarge = Typography().titleLarge.copy(fontFamily = VazirmatnFamily),
-    titleMedium = Typography().titleMedium.copy(fontFamily = VazirmatnFamily),
-    titleSmall = Typography().titleSmall.copy(fontFamily = VazirmatnFamily),
-    bodyLarge = Typography().bodyLarge.copy(fontFamily = VazirmatnFamily),
-    bodyMedium = Typography().bodyMedium.copy(fontFamily = VazirmatnFamily),
-    bodySmall = Typography().bodySmall.copy(fontFamily = VazirmatnFamily),
-    labelLarge = Typography().labelLarge.copy(fontFamily = VazirmatnFamily),
-    labelMedium = Typography().labelMedium.copy(fontFamily = VazirmatnFamily),
-    labelSmall = Typography().labelSmall.copy(fontFamily = VazirmatnFamily),
-)'''
+private val DicodeTypography = Typography().let { base ->
+    Typography(
+        displayLarge = base.displayLarge.copy(fontFamily = VazirmatnFamily),
+        displayMedium = base.displayMedium.copy(fontFamily = VazirmatnFamily),
+        displaySmall = base.displaySmall.copy(fontFamily = VazirmatnFamily),
+        headlineLarge = base.headlineLarge.copy(fontFamily = VazirmatnFamily),
+        headlineMedium = base.headlineMedium.copy(fontFamily = VazirmatnFamily),
+        headlineSmall = base.headlineSmall.copy(fontFamily = VazirmatnFamily),
+        titleLarge = base.titleLarge.copy(fontFamily = VazirmatnFamily),
+        titleMedium = base.titleMedium.copy(fontFamily = VazirmatnFamily),
+        titleSmall = base.titleSmall.copy(fontFamily = VazirmatnFamily),
+        bodyLarge = base.bodyLarge.copy(fontFamily = VazirmatnFamily),
+        bodyMedium = base.bodyMedium.copy(fontFamily = VazirmatnFamily),
+        bodySmall = base.bodySmall.copy(fontFamily = VazirmatnFamily),
+        labelLarge = base.labelLarge.copy(fontFamily = VazirmatnFamily),
+        labelMedium = base.labelMedium.copy(fontFamily = VazirmatnFamily),
+        labelSmall = base.labelSmall.copy(fontFamily = VazirmatnFamily),
+    )
+}'''
 if "VazirmatnFamily" not in text:
     if marker not in text:
         raise SystemExit("color marker missing")
@@ -53,7 +55,6 @@ new = '''CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.
         ) {'''
 if old in text:
     text = text.replace(old, new, 1)
-    # DicodeApp ends immediately before the next @Composable declaration.
     boundary = "\n}\n\n@Composable\nprivate fun DashboardPage"
     if boundary not in text:
         raise SystemExit("DicodeApp closing boundary missing")
@@ -61,7 +62,6 @@ if old in text:
 elif "CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl)" not in text:
     raise SystemExit("MaterialTheme marker missing")
 
-# Ensure manifest and theme explicitly opt into RTL and the bundled font.
 manifest_path = Path("android/app/src/main/AndroidManifest.xml")
 manifest = manifest_path.read_text(encoding="utf-8")
 if 'android:supportsRtl="true"' not in manifest:
@@ -79,11 +79,7 @@ gradle = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 151", gradle, count=1)
 gradle = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "1.5.1"', gradle, count=1)
 gradle_path.write_text(gradle, encoding="utf-8")
 
-required = (
-    'private const val VERSION = "1.5.1"',
-    "VazirmatnFamily",
-    "LocalLayoutDirection provides LayoutDirection.Rtl",
-)
+required = ('private const val VERSION = "1.5.1"', "VazirmatnFamily", "LocalLayoutDirection provides LayoutDirection.Rtl")
 if not all(value in text for value in required):
     raise SystemExit("Android v1.5.1 RTL/font markers are missing")
 main_path.write_text(text, encoding="utf-8")
