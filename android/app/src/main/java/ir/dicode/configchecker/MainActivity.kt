@@ -26,8 +26,13 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import go.Seq
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import libv2ray.Libv2ray
 import org.json.JSONArray
 import org.json.JSONObject
@@ -40,7 +45,7 @@ import java.net.URLDecoder
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
-private const val VERSION = "1.1.0"
+private const val VERSION = "2.0.0"
 private val Bg = Color(0xFF090D12)
 private val Card = Color(0xFF111821)
 private val Card2 = Color(0xFF0D141D)
@@ -60,7 +65,7 @@ private data class SettingsState(
     val fetchWorkers: Int = 8,
     val attempts: Int = 2,
     val minSuccess: Int = 1,
-    val checkUrl: String = "http://www.gstatic.com/generate_204",
+    val checkUrl: String = "https://www.gstatic.com/generate_204",
     val tagPrefix: String = "t.me/dicodeir",
     val renameNames: Boolean = true,
     val checkConfigs: Boolean = true,
@@ -106,7 +111,7 @@ private fun DicodeApp() {
     var settings by remember { mutableStateOf(SettingsState()) }
     var priority1 by rememberSaveable { mutableStateOf("t.me/dicodeir\nt.me/persianvpnhub") }
     var priority2 by rememberSaveable {
-        mutableStateOf("t.me/PrivateVPNs\nt.me/v2rayNG_Matsuri\nt.me/vmess_ir\nt.me/V2ray_Alpha\nt.me/DailyV2RY")
+        mutableStateOf("t.me/PrivateVPNs\nt.me/vmess_ir\nt.me/V2ray_Alpha\nt.me/DailyV2RY")
     }
     var collected by remember { mutableStateOf<List<Candidate>>(emptyList()) }
     var results by remember { mutableStateOf<List<CheckResult>>(emptyList()) }
@@ -134,7 +139,7 @@ private fun DicodeApp() {
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Dicode Config Checker", color = Text, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("Android • Xray Core • v$VERSION", color = Muted, style = MaterialTheme.typography.labelMedium)
+                            Text("Android • Real HTTP • v$VERSION", color = Muted, style = MaterialTheme.typography.labelMedium)
                         }
                         AssistChip(onClick = {}, label = { Text(if (busy) "در حال اجرا" else "آماده") })
                     }
@@ -235,7 +240,7 @@ private fun DashboardPage(
             Metric("دریافت", collected.size, Muted, Modifier.weight(1f))
             Metric("سالم", results.count { it.ok }, Good, Modifier.weight(1f))
             Metric("ناموفق", results.count { !it.ok }, Bad, Modifier.weight(1f))
-            Metric("Xray", results.count { it.tester == "xray" }, Accent, Modifier.weight(1f))
+            Metric("تست واقعی", results.count { it.tester == "core-http" }, Accent, Modifier.weight(1f))
         }
         Panel {
             Text("وضعیت اجرا", color = Text, fontWeight = FontWeight.Bold)
@@ -262,11 +267,11 @@ private fun DashboardPage(
 @Composable
 private fun SettingsPage(value: SettingsState, onChange: (SettingsState) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PageHeader("تنظیمات", "همان گزینه‌های اصلی نسخه ویندوز")
+        PageHeader("تنظیمات", "کنترل سرعت و دقت بررسی")
         Panel {
             NumberField("تعداد از هر کانال رتبه دوم", value.perChannelLimit) { onChange(value.copy(perChannelLimit = it)) }
             NumberField("تعداد از هر کانال رتبه اول", value.priorityLimit) { onChange(value.copy(priorityLimit = it)) }
-            NumberField("Fetch workers", value.fetchWorkers) { onChange(value.copy(fetchWorkers = it)) }
+            NumberField("پردازش موازی", value.fetchWorkers) { onChange(value.copy(fetchWorkers = it)) }
             NumberField("تعداد تلاش", value.attempts) { onChange(value.copy(attempts = it, minSuccess = value.minSuccess.coerceAtMost(it))) }
             NumberField("حداقل موفقیت", value.minSuccess) { onChange(value.copy(minSuccess = it.coerceAtMost(value.attempts))) }
         }
@@ -278,7 +283,7 @@ private fun SettingsPage(value: SettingsState, onChange: (SettingsState) -> Unit
             Toggle("بررسی پروکسی‌های تلگرام", value.checkProxies) { onChange(value.copy(checkProxies = it)) }
             Toggle("پیش‌فیلتر سریع TCP", value.tcpPrefilter) { onChange(value.copy(tcpPrefilter = it)) }
         }
-        Text("کانفیگ‌های VLESS، VMess و Trojan از داخل Xray Core تست می‌شوند؛ موارد پشتیبانی‌نشده با TCP مشخص می‌شوند.", color = Muted)
+        Text("کانفیگ‌های سازگار با درخواست HTTP واقعی بررسی می‌شوند؛ پروکسی‌های Telegram تست TCP مستقل دارند.", color = Muted)
     }
 }
 
@@ -357,8 +362,10 @@ private suspend fun collectAll(
     val second = priority2.lines().mapNotNull(::normalizeChannel).distinctBy { it.lowercase() }.filterNot { c -> first.any { it.equals(c, true) } }
     val channels = first.map { it to settings.priorityLimit } + second.map { it to settings.perChannelLimit }
     val found = ConcurrentHashMap<String, Candidate>()
-    channels.forEachIndexed { index, (channel, limit) ->
-        val msg = runCatching {
+    val gate = Semaphore(settings.fetchWorkers.coerceIn(1, 24))
+    val completed = java.util.concurrent.atomic.AtomicInteger(0)
+    coroutineScope { channels.map { (channel, limit) -> async {
+        val msg = gate.withPermit { runCatching {
             val conn = URL("https://t.me/s/$channel").openConnection() as HttpURLConnection
             conn.connectTimeout = 15000; conn.readTimeout = 15000
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 DicodeConfigChecker/$VERSION")
@@ -372,38 +379,44 @@ private suspend fun collectAll(
                 }
             }
             "@$channel | +$count | کل ${found.size}"
-        }.getOrElse { "@$channel | خطا: ${it.javaClass.simpleName}" }
-        update(index + 1, channels.size, msg)
-    }
+        }.getOrElse { "@$channel | خطا: ${it.javaClass.simpleName}" } }
+        update(completed.incrementAndGet(), channels.size, msg)
+    } }.awaitAll() }
     found.values.toList()
 }
 
 private suspend fun testAll(items: List<Candidate>, settings: SettingsState, update: (Int, Int, String) -> Unit): List<CheckResult> = withContext(Dispatchers.IO) {
     val filtered = items.filter { if (it.proxy) settings.checkProxies else settings.checkConfigs }
-    filtered.mapIndexed { index, item ->
-        val result = if (!item.proxy && item.xrayJson != null) {
-            val samples = mutableListOf<Int>(); var error = "xray_failed"
-            repeat(settings.attempts.coerceIn(1, 8)) {
-                runCatching { Libv2ray.measureOutboundDelay(item.xrayJson, settings.checkUrl).toInt() }
-                    .onSuccess { if (it >= 0) samples += it else error = "negative_delay" }
-                    .onFailure { error = it.javaClass.simpleName }
-            }
-            val ok = samples.size >= settings.minSuccess.coerceAtLeast(1)
-            CheckResult(item, ok, if (ok) samples.average().toInt() else null, "xray", if (ok) "" else error)
-        } else {
-            val samples = mutableListOf<Int>(); var error = "unreachable"
-            repeat(settings.attempts.coerceIn(1, 8)) {
-                val started = System.nanoTime()
-                runCatching { Socket().use { it.connect(InetSocketAddress(item.host, item.port), 3500) } }
-                    .onSuccess { samples += ((System.nanoTime() - started) / 1_000_000).toInt() }
-                    .onFailure { error = it.javaClass.simpleName }
-            }
-            val ok = samples.size >= settings.minSuccess.coerceAtLeast(1)
-            CheckResult(item, ok, if (ok) samples.average().toInt() else null, if (item.proxy) "telegram-tcp" else "tcp-fallback", if (ok) "" else error)
-        }
-        update(index + 1, filtered.size, "${if (result.ok) "OK" else "FAIL"} ${item.protocol} ${item.host}:${item.port} ${result.ping ?: "-"}ms • ${result.tester}")
-        result
+    val gate = Semaphore(settings.fetchWorkers.coerceIn(1, 16))
+    val done = java.util.concurrent.atomic.AtomicInteger(0)
+    coroutineScope {
+        filtered.map { item -> async {
+            val result = gate.withPermit { testCandidate(item, settings) }
+            val current = done.incrementAndGet()
+            update(current, filtered.size, "${if (result.ok) "OK" else "FAIL"} ${item.protocol} ${item.host}:${item.port} ${result.ping ?: "-"}ms • ${result.tester}")
+            result
+        } }.awaitAll()
     }.sortedWith(compareBy<CheckResult> { !it.ok }.thenBy { it.ping ?: Int.MAX_VALUE })
+}
+
+private fun testCandidate(item: Candidate, settings: SettingsState): CheckResult {
+    val samples = mutableListOf<Int>()
+    var error = "unreachable"
+    repeat(settings.attempts.coerceIn(1, 5)) {
+        if (!item.proxy && item.xrayJson != null) {
+            runCatching { Libv2ray.measureOutboundDelay(item.xrayJson, settings.checkUrl).toInt() }
+                .onSuccess { if (it >= 0) samples += it else error = "negative_delay" }
+                .onFailure { error = it.javaClass.simpleName }
+        } else {
+            val started = System.nanoTime()
+            runCatching { Socket().use { socket -> socket.tcpNoDelay = true; socket.connect(InetSocketAddress(item.host, item.port), 3500) } }
+                .onSuccess { samples += ((System.nanoTime() - started) / 1_000_000).toInt().coerceAtLeast(1) }
+                .onFailure { error = it.javaClass.simpleName }
+        }
+    }
+    samples.sort()
+    val ok = samples.size >= settings.minSuccess.coerceIn(1, settings.attempts.coerceAtLeast(1))
+    return CheckResult(item, ok, if (ok) samples[samples.size / 2] else null, if (item.proxy) "telegram-tcp" else "core-http", if (ok) "" else error)
 }
 
 private fun parseCandidate(raw: String, source: String): Candidate? = runCatching {
