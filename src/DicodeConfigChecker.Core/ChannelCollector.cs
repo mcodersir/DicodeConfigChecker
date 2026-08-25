@@ -9,28 +9,36 @@ public sealed partial class ChannelCollector(HttpClient? client = null)
     private readonly HttpClient _client = client ?? CreateClient();
 
     public async Task<IReadOnlyList<Candidate>> CollectAsync(IEnumerable<string> channels, int perChannelLimit, int parallelism, IProgress<ProgressInfo>? progress = null, CancellationToken cancellationToken = default)
+        => await CollectRankedAsync([], channels, new CollectOptions(perChannelLimit, perChannelLimit, parallelism), progress, cancellationToken);
+
+    public async Task<IReadOnlyList<Candidate>> CollectRankedAsync(IEnumerable<string> priorityOne, IEnumerable<string> priorityTwo, CollectOptions options, IProgress<ProgressInfo>? progress = null, CancellationToken cancellationToken = default)
     {
-        var normalized = channels.Select(NormalizeChannel).Where(x => x is not null).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var ranked = priorityOne.Select(x => (Channel: NormalizeChannel(x), Limit: options.PriorityOneLimit, Rank: 1))
+            .Concat(priorityTwo.Select(x => (Channel: NormalizeChannel(x), Limit: options.PriorityTwoLimit, Rank: 2)))
+            .Where(x => x.Channel is not null)
+            .GroupBy(x => x.Channel!, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.OrderBy(y => y.Rank).First())
+            .ToArray();
         var found = new ConcurrentDictionary<string, Candidate>(StringComparer.OrdinalIgnoreCase);
         var completed = 0;
-        await Parallel.ForEachAsync(normalized, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(parallelism, 1, 32), CancellationToken = cancellationToken }, async (channel, token) =>
+        await Parallel.ForEachAsync(ranked, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(options.Parallelism, 1, 64), CancellationToken = cancellationToken }, async (entry, token) =>
         {
             var count = 0;
             try
             {
-                var html = await FetchPreviewAsync(channel, token);
+                var html = await FetchPreviewAsync(entry.Channel!, token);
                 foreach (Match match in ProfileRegex().Matches(WebUtility.HtmlDecode(html).Replace("\\u0026", "&")))
                 {
                     var raw = match.Value.TrimEnd(')', ']', '}', '"', '\'', '>', '،', ',', '.', ';');
-                    var candidate = ProfileParser.Parse(raw, channel);
+                    var candidate = ProfileParser.Parse(raw, entry.Channel!);
                     if (candidate is null) continue;
                     var key = candidate.Protocol == "vmess" ? candidate.Raw : candidate.Raw.Split('#')[0];
-                    if (found.TryAdd(key, candidate) && ++count >= perChannelLimit) break;
+                    if (found.TryAdd(key, candidate) && ++count >= Math.Clamp(entry.Limit, 1, 1000)) break;
                 }
             }
             catch { }
             var done = Interlocked.Increment(ref completed);
-            progress?.Report(new(done, normalized.Length, $"@{channel}  +{count}"));
+            progress?.Report(new(done, ranked.Length, $"رتبه {entry.Rank} • @{entry.Channel}  +{count}"));
         });
         return found.Values.ToList();
     }

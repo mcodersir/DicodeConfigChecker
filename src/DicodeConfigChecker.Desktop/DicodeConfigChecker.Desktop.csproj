@@ -1,17 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
+    <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>Dicode.ConfigChecker.Desktop</RootNamespace>
-    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationIcon Condition="$([MSBuild]::IsOSPlatform('Windows'))">..\..\assets\app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
     <ProjectReference Include="..\DicodeConfigChecker.Core\DicodeConfigChecker.Core.csproj" />
     <Content Include="..\..\channels.txt" Link="channels.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\runtimes')" />
+    <AvaloniaResource Include="..\..\assets\fonts\**" Link="Assets\Fonts\%(RecursiveDir)%(Filename)%(Extension)" Condition="Exists('..\..\assets\fonts')" />
   </ItemGroup>
 </Project>

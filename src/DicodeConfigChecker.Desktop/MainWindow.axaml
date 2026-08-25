@@ -1,0 +1,80 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Dicode.ConfigChecker.Desktop.MainWindow" Title="Dicode Config Checker 2"
+        Width="1180" Height="780" MinWidth="900" MinHeight="620" FlowDirection="RightToLeft" WindowStartupLocation="CenterScreen">
+  <Grid ColumnDefinitions="230,*">
+    <Border Grid.Column="0" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,1,0" Padding="14">
+      <Grid RowDefinitions="Auto,22,*,Auto">
+        <StackPanel>
+          <Border Width="44" Height="44" CornerRadius="14" Background="#2167E8" HorizontalAlignment="Right"><PathIcon Data="M12,2 L15,9 L22,12 L15,15 L12,22 L9,15 L2,12 L9,9 Z" Foreground="White" Width="22"/></Border>
+          <TextBlock Text="Dicode Config Checker" FontWeight="Bold" Margin="0,10,0,0"/>
+          <TextBlock Text="نسخه ۲ • چهارسکویی" Classes="muted" FontSize="12"/>
+        </StackPanel>
+        <StackPanel Grid.Row="2">
+          <Button Classes="nav" Click="Dashboard_Click"><StackPanel Orientation="Horizontal" Spacing="10"><PathIcon Data="M3,3 H10 V10 H3 Z M14,3 H21 V10 H14 Z M3,14 H10 V21 H3 Z M14,14 H21 V21 H14 Z" Width="18"/><TextBlock Text="داشبورد"/></StackPanel></Button>
+          <Button Classes="nav" Click="Settings_Click"><StackPanel Orientation="Horizontal" Spacing="10"><PathIcon Data="M4,7 H14 M18,7 H20 M4,17 H6 M10,17 H20 M16,4 V10 M8,14 V20" Width="18"/><TextBlock Text="تنظیمات"/></StackPanel></Button>
+          <Button Classes="nav" Click="Channels_Click"><StackPanel Orientation="Horizontal" Spacing="10"><PathIcon Data="M5,6 H21 M5,12 H21 M5,18 H21 M2,6 H2.1 M2,12 H2.1 M2,18 H2.1" Width="18"/><TextBlock Text="کانال‌ها"/></StackPanel></Button>
+          <Button Classes="nav" Click="Configs_Click"><StackPanel Orientation="Horizontal" Spacing="10"><PathIcon Data="M5,12 L10,17 L20,7" Width="18"/><TextBlock Text="کانفیگ‌ها"/></StackPanel></Button>
+          <Button Classes="nav" Click="Proxies_Click"><StackPanel Orientation="Horizontal" Spacing="10"><PathIcon Data="M4,8 A4,4 0 0 1 8,4 H12 A4,4 0 0 1 16,8 V16 A4,4 0 0 1 12,20 H8 A4,4 0 0 1 4,16 Z M8,12 H12" Width="18"/><TextBlock Text="پروکسی‌ها"/></StackPanel></Button>
+        </StackPanel>
+        <StackPanel Grid.Row="3" Spacing="8">
+          <ComboBox x:Name="ThemeBox" SelectedIndex="0" SelectionChanged="ThemeBox_Changed"><ComboBoxItem Content="پوسته سیستم"/><ComboBoxItem Content="روشن"/><ComboBoxItem Content="تیره"/></ComboBox>
+          <TextBlock x:Name="RuntimeStatus" Text="بررسی هسته‌ها…" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Column="1" Margin="24">
+      <ScrollViewer x:Name="DashboardPage">
+        <StackPanel Spacing="16">
+          <StackPanel><TextBlock Text="داشبورد" Classes="title"/><TextBlock Text="دریافت، قطع اتصال فعلی و سپس تست واقعی" Classes="muted"/></StackPanel>
+          <Grid ColumnDefinitions="*,12,*,12,*,12,*">
+            <Border Classes="card"><StackPanel><TextBlock Text="دریافت‌شده" Classes="muted"/><TextBlock x:Name="CollectedMetric" Text="۰" FontSize="28" FontWeight="Bold"/></StackPanel></Border>
+            <Border Grid.Column="2" Classes="card"><StackPanel><TextBlock Text="کانفیگ سالم" Classes="muted"/><TextBlock x:Name="ConfigMetric" Text="۰" FontSize="28" FontWeight="Bold" Foreground="#22A06B"/></StackPanel></Border>
+            <Border Grid.Column="4" Classes="card"><StackPanel><TextBlock Text="پروکسی سالم" Classes="muted"/><TextBlock x:Name="ProxyMetric" Text="۰" FontSize="28" FontWeight="Bold" Foreground="#3B82F6"/></StackPanel></Border>
+            <Border Grid.Column="6" Classes="card"><StackPanel><TextBlock Text="ناموفق" Classes="muted"/><TextBlock x:Name="FailedMetric" Text="۰" FontSize="28" FontWeight="Bold" Foreground="#E5484D"/></StackPanel></Border>
+          </Grid>
+          <Border Classes="card"><StackPanel Spacing="12"><TextBlock Text="وضعیت اجرا" FontWeight="Bold"/><TextBlock x:Name="StatusText" Text="آماده" Classes="muted"/><ProgressBar x:Name="RunProgress" Minimum="0" Maximum="100" Height="7"/><TextBlock x:Name="DisconnectHint" Text="مرحلهٔ دریافت تمام شد؛ اتصال فعلی را قطع کنید و سپس مرحلهٔ دوم را بزنید." Foreground="#D97706" IsVisible="False"/></StackPanel></Border>
+          <Border Classes="card">
+            <StackPanel Spacing="10"><TextBlock Text="کنترل عملیات" FontWeight="Bold"/>
+              <Button x:Name="CollectButton" Content="۱. دریافت از کانال‌ها" Click="Collect_Click" HorizontalAlignment="Stretch"/>
+              <Button x:Name="TestButton" Content="۲. تست واقعی و ساخت خروجی" Click="Test_Click" IsEnabled="False" HorizontalAlignment="Stretch"/>
+              <Grid ColumnDefinitions="*,10,*"><Button x:Name="StopButton" Content="توقف موقت" Click="Stop_Click" IsEnabled="False"/><Button Grid.Column="2" Content="باز کردن پوشه خروجی" Click="OpenOutput_Click"/></Grid>
+            </StackPanel>
+          </Border>
+          <Border Classes="card"><StackPanel Spacing="8"><TextBlock Text="لاگ زنده" FontWeight="Bold"/><TextBox x:Name="LogBox" IsReadOnly="True" AcceptsReturn="True" MinHeight="150" MaxHeight="240" FontFamily="Consolas, monospace"/></StackPanel></Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer x:Name="SettingsPage" IsVisible="False">
+        <StackPanel Spacing="16">
+          <StackPanel><TextBlock Text="تنظیمات" Classes="title"/><TextBlock Text="کنترل کامل سرعت، کیفیت، خروجی و ساب شخصی" Classes="muted"/></StackPanel>
+          <Border Classes="card"><Grid ColumnDefinitions="*,14,*" RowDefinitions="Auto,Auto,Auto,Auto">
+            <TextBlock Text="سقف کانال رتبه اول"/><NumericUpDown x:Name="PriorityOneLimit" Grid.Row="1" Minimum="1" Maximum="1000" Value="30"/>
+            <TextBlock Grid.Column="2" Text="سقف کانال رتبه دوم"/><NumericUpDown x:Name="PriorityTwoLimit" Grid.Row="1" Grid.Column="2" Minimum="1" Maximum="300" Value="20"/>
+            <TextBlock Grid.Row="2" Margin="0,12,0,0" Text="دریافت موازی"/><NumericUpDown x:Name="FetchWorkers" Grid.Row="3" Minimum="1" Maximum="64" Value="8"/>
+            <TextBlock Grid.Row="2" Grid.Column="2" Margin="0,12,0,0" Text="تست موازی"/><NumericUpDown x:Name="TestWorkers" Grid.Row="3" Grid.Column="2" Minimum="1" Maximum="128" Value="16"/>
+          </Grid></Border>
+          <Border Classes="card"><Grid ColumnDefinitions="*,14,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Text="تعداد تلاش"/><NumericUpDown x:Name="Attempts" Grid.Row="1" Minimum="1" Maximum="8" Value="4"/>
+            <TextBlock Grid.Column="2" Text="حداقل موفقیت"/><NumericUpDown x:Name="MinimumSuccess" Grid.Row="1" Grid.Column="2" Minimum="1" Maximum="8" Value="3"/>
+            <TextBlock Grid.Row="2" Margin="0,12,0,0" Text="اندازه batch"/><NumericUpDown x:Name="PageSize" Grid.Row="3" Minimum="1" Maximum="128" Value="32"/>
+            <TextBlock Grid.Row="2" Grid.Column="2" Margin="0,12,0,0" Text="URL تست واقعی"/><TextBox x:Name="TestUrl" Grid.Row="3" Grid.Column="2" Text="https://www.gstatic.com/generate_204" FlowDirection="LeftToRight"/>
+            <CheckBox x:Name="CheckConfigs" Grid.Row="4" Margin="0,14,0,0" Content="بررسی کانفیگ و ساخت sub.txt" IsChecked="True"/>
+            <CheckBox x:Name="CheckProxies" Grid.Row="4" Grid.Column="2" Margin="0,14,0,0" Content="بررسی پروکسی و ساخت proxy.txt" IsChecked="True"/>
+            <CheckBox x:Name="RenameConfigs" Grid.Row="5" Margin="0,10,0,0" Content="بازنویسی نام کانفیگ" IsChecked="True"/>
+            <TextBox x:Name="NamePrefix" Grid.Row="5" Grid.Column="2" Margin="0,10,0,0" Text="t.me/dicodeir"/>
+          </Grid></Border>
+          <Border Classes="card"><StackPanel Spacing="10"><TextBlock Text="ساب اختصاصی GitHub" FontWeight="Bold"/><TextBlock Text="توکن فقط در تنظیمات محلی دستگاه ذخیره می‌شود. انتشار sub.txt و proxy.txt اتمیک و راستی‌آزمایی می‌شود." Classes="muted" TextWrapping="Wrap"/><TextBox x:Name="GitHubToken" PasswordChar="●" Watermark="Classic PAT با public_repo" FlowDirection="LeftToRight"/><TextBox x:Name="SubscriptionRepo" IsReadOnly="True" Watermark="پس از اتصال ساخته می‌شود" FlowDirection="LeftToRight"/><Grid ColumnDefinitions="*,10,*"><Button Content="ساخت / اتصال ریپازیتوری" Click="ConnectSubscription_Click"/><Button Grid.Column="2" Content="انتشار دوباره خروجی" Click="PublishSubscription_Click"/></Grid><TextBox x:Name="SubUrl" IsReadOnly="True" FlowDirection="LeftToRight"/><TextBox x:Name="ProxyUrl" IsReadOnly="True" FlowDirection="LeftToRight"/></StackPanel></Border>
+          <Button Content="ذخیره تنظیمات" Click="SaveSettings_Click" HorizontalAlignment="Right"/>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer x:Name="ChannelsPage" IsVisible="False">
+        <StackPanel Spacing="16"><StackPanel><TextBlock Text="کانال‌ها" Classes="title"/><TextBlock Text="رتبه اول و دوم با سقف مستقل" Classes="muted"/></StackPanel><Border Classes="card"><StackPanel Spacing="8"><TextBlock Text="کانال‌های رتبه اول" FontWeight="Bold"/><TextBox x:Name="PriorityOneChannels" AcceptsReturn="True" MinHeight="180"/></StackPanel></Border><Border Classes="card"><StackPanel Spacing="8"><TextBlock Text="کانال‌های رتبه دوم" FontWeight="Bold"/><TextBox x:Name="PriorityTwoChannels" AcceptsReturn="True" MinHeight="260"/></StackPanel></Border><Grid ColumnDefinitions="*,10,*"><Button Content="حذف تکراری‌ها و ذخیره" Click="SaveChannels_Click"/><Button Grid.Column="2" Content="بازگردانی فهرست همراه برنامه" Click="ResetChannels_Click"/></Grid></StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer x:Name="ConfigsPage" IsVisible="False"><StackPanel Spacing="14"><TextBlock Text="کانفیگ‌ها" Classes="title"/><TextBlock x:Name="ConfigCount" Classes="muted"/><Grid ColumnDefinitions="*,10,*"><Button Content="کپی sub.txt" Click="CopyConfigs_Click"/><Button Grid.Column="2" Content="به‌روزرسانی ساب GitHub" Click="PublishSubscription_Click"/></Grid><TextBox x:Name="ConfigOutput" IsReadOnly="True" AcceptsReturn="True" MinHeight="520" FontFamily="Consolas, monospace" FlowDirection="LeftToRight"/></StackPanel></ScrollViewer>
+      <ScrollViewer x:Name="ProxiesPage" IsVisible="False"><StackPanel Spacing="14"><TextBlock Text="پروکسی‌ها" Classes="title"/><TextBlock x:Name="ProxyCount" Classes="muted"/><Grid ColumnDefinitions="*,10,*"><Button Content="کپی proxy.txt" Click="CopyProxies_Click"/><Button Grid.Column="2" Content="به‌روزرسانی ساب GitHub" Click="PublishSubscription_Click"/></Grid><TextBox x:Name="ProxyOutput" IsReadOnly="True" AcceptsReturn="True" MinHeight="520" FontFamily="Consolas, monospace" FlowDirection="LeftToRight"/></StackPanel></ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>
