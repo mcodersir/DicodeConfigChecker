@@ -21,6 +21,9 @@ env:
   CORE_B_VERSION: 1.13.15
   CORE_B_SHA256: 599b296f6e57511d36d2a6f3011aed1a86fa98418578bbb06bd6dc241b5d8877
   GEO_VERSION: 202608052252
+  CORE_B_SHA256_LINUX_AMD64: a3a3ff223b23c3f4731d0a17cb0ef94c97ce257c70721a5b07dc7ca079203c9f
+  CORE_B_SHA256_DARWIN_AMD64: 817e04f90f941b718fedd965ff05bfe72abfcc62952888b01751a6dec5547e14
+  CORE_B_SHA256_DARWIN_ARM64: 3452d866834c9572389e5ca73e60d4ee45a7d5b79332188c9a9e533c5fd40a6d
   ANDROID_CORE_COMMIT: ecf84ee82ac975c39852397351d1618a40df7cd2
 
 jobs:
@@ -88,6 +91,125 @@ jobs:
           path: DicodeConfigChecker-v${{ env.VERSION }}-windows-x64.zip
           if-no-files-found: error
 
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 8.0.x }
+      - name: Add pinned network runtimes and GeoFiles
+        run: |
+          set -e
+          mkdir -p runtimes
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${CORE_A_VERSION}/Xray-linux-64.zip" -o core-a.zip
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${CORE_A_VERSION}/Xray-linux-64.zip.dgst" -o core-a.dgst
+          coreAExpected=$(grep -iE "^SHA2-?256" core-a.dgst | head -1 | grep -oE "[0-9a-fA-F]{64}" | head -1 | tr "A-F" "a-f")
+          if [ -z "$coreAExpected" ]; then echo "Core A digest format was not recognized." && exit 1; fi
+          coreAActual=$(sha256sum core-a.zip | cut -d" " -f1)
+          if [ "$coreAActual" != "$coreAExpected" ]; then echo "Core A integrity check failed." && exit 1; fi
+          unzip -q core-a.zip -d core-a
+          install -m 755 core-a/xray runtimes/core-a
+          curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${CORE_B_VERSION}/sing-box-${CORE_B_VERSION}-linux-amd64.tar.gz" -o core-b.tar.gz
+          coreBActual=$(sha256sum core-b.tar.gz | cut -d" " -f1)
+          if [ "$coreBActual" != "${CORE_B_SHA256_LINUX_AMD64}" ]; then echo "Core B integrity check failed." && exit 1; fi
+          tar -xzf core-b.tar.gz
+          install -m 755 "sing-box-${CORE_B_VERSION}-linux-amd64/sing-box" runtimes/core-b
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geoip.dat" -o runtimes/geoip.dat
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geosite.dat" -o runtimes/geosite.dat
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geoip.dat.sha256sum" -o geoip.sha256sum
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geosite.dat.sha256sum" -o geosite.sha256sum
+          echo "$(cut -d" " -f1 geoip.sha256sum)  runtimes/geoip.dat" | sha256sum -c - >/dev/null
+          echo "$(cut -d" " -f1 geosite.sha256sum)  runtimes/geosite.dat" | sha256sum -c - >/dev/null
+          ./runtimes/core-a version
+          ./runtimes/core-b version
+      - name: Publish self-contained Linux x64
+        run: dotnet publish src/DicodeConfigChecker.Desktop -c Release -r linux-x64 --self-contained true -o publish
+      - name: Package Linux
+        run: |
+          set -e
+          mkdir -p package/DicodeConfigChecker-v${VERSION}-linux-x86_64
+          cp -r publish/. package/DicodeConfigChecker-v${VERSION}-linux-x86_64/
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md channels.txt package/DicodeConfigChecker-v${VERSION}-linux-x86_64/
+          find package/DicodeConfigChecker-v${VERSION}-linux-x86_64/runtimes -type f -exec chmod 755 {} +
+          tar -czf DicodeConfigChecker-v${VERSION}-linux-x86_64.tar.gz -C package DicodeConfigChecker-v${VERSION}-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: DicodeConfigChecker-v${VERSION}-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 8.0.x }
+      - name: Add pinned network runtimes and GeoFiles
+        run: |
+          set -e
+          mkdir -p rt-x64 rt-arm64
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${CORE_A_VERSION}/Xray-macos-64.zip" -o core-a-x64.zip
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${CORE_A_VERSION}/Xray-macos-64.zip.dgst" -o core-a-x64.dgst
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${CORE_A_VERSION}/Xray-macos-arm64-v8a.zip" -o core-a-arm64.zip
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${CORE_A_VERSION}/Xray-macos-arm64-v8a.zip.dgst" -o core-a-arm64.dgst
+          expectedX64=$(grep -iE "^SHA2-?256" core-a-x64.dgst | head -1 | grep -oE "[0-9a-fA-F]{64}" | head -1 | tr "A-F" "a-f")
+          expectedArm=$(grep -iE "^SHA2-?256" core-a-arm64.dgst | head -1 | grep -oE "[0-9a-fA-F]{64}" | head -1 | tr "A-F" "a-f")
+          if [ -z "$expectedX64" ] || [ -z "$expectedArm" ]; then echo "Core A digest format was not recognized." && exit 1; fi
+          if [ "$(sha256sum core-a-x64.zip | cut -d" " -f1)" != "$expectedX64" ]; then echo "Core A x64 integrity check failed." && exit 1; fi
+          if [ "$(sha256sum core-a-arm64.zip | cut -d" " -f1)" != "$expectedArm" ]; then echo "Core A arm64 integrity check failed." && exit 1; fi
+          unzip -q core-a-x64.zip -d core-a-x64
+          unzip -q core-a-arm64.zip -d core-a-arm64
+          install -m 755 core-a-x64/xray rt-x64/core-a
+          install -m 755 core-a-arm64/xray rt-arm64/core-a
+          curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${CORE_B_VERSION}/sing-box-${CORE_B_VERSION}-darwin-amd64.tar.gz" -o core-b-x64.tar.gz
+          curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${CORE_B_VERSION}/sing-box-${CORE_B_VERSION}-darwin-arm64.tar.gz" -o core-b-arm64.tar.gz
+          if [ "$(sha256sum core-b-x64.tar.gz | cut -d" " -f1)" != "${CORE_B_SHA256_DARWIN_AMD64}" ]; then echo "Core B amd64 integrity check failed." && exit 1; fi
+          if [ "$(sha256sum core-b-arm64.tar.gz | cut -d" " -f1)" != "${CORE_B_SHA256_DARWIN_ARM64}" ]; then echo "Core B arm64 integrity check failed." && exit 1; fi
+          tar -xzf core-b-x64.tar.gz
+          tar -xzf core-b-arm64.tar.gz
+          install -m 755 "sing-box-${CORE_B_VERSION}-darwin-amd64/sing-box" rt-x64/core-b
+          install -m 755 "sing-box-${CORE_B_VERSION}-darwin-arm64/sing-box" rt-arm64/core-b
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geoip.dat" -o geoip.dat
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geosite.dat" -o geosite.dat
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geoip.dat.sha256sum" -o geoip.sha256sum
+          curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${GEO_VERSION}/geosite.dat.sha256sum" -o geosite.sha256sum
+          echo "$(cut -d" " -f1 geoip.sha256sum)  geoip.dat" | shasum -a 256 -c - >/dev/null
+          echo "$(cut -d" " -f1 geosite.sha256sum)  geosite.dat" | shasum -a 256 -c - >/dev/null
+          cp geoip.dat geosite.dat rt-x64/
+          cp geoip.dat geosite.dat rt-arm64/
+          ./rt-x64/core-a version
+          ./rt-x64/core-b version
+      - name: Publish self-contained macOS binaries
+        run: |
+          set -e
+          dotnet publish src/DicodeConfigChecker.Desktop -c Release -r osx-x64 --self-contained true -o publish-x64
+          dotnet publish src/DicodeConfigChecker.Desktop -c Release -r osx-arm64 --self-contained true -o publish-arm64
+      - name: Package macOS archives
+        run: |
+          set -e
+          mkdir -p pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64 pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64
+          cp -r publish-x64/. pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64/
+          cp -r publish-arm64/. pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64/
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md channels.txt pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64/
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md channels.txt pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64/
+          rm -rf pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64/runtimes pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64/runtimes
+          mkdir -p pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64/runtimes pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64/runtimes
+          cp rt-x64/core-a rt-x64/core-b rt-x64/geoip.dat rt-x64/geosite.dat pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64/runtimes/
+          cp rt-arm64/core-a rt-arm64/core-b rt-arm64/geoip.dat rt-arm64/geosite.dat pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64/runtimes/
+          chmod 755 pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64/DicodeConfigChecker.Desktop pkg-x64/DicodeConfigChecker-v${VERSION}-macos-x86_64/runtimes/*
+          chmod 755 pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64/DicodeConfigChecker.Desktop pkg-arm64/DicodeConfigChecker-v${VERSION}-macos-arm64/runtimes/*
+          (cd pkg-x64 && zip -qry ../DicodeConfigChecker-v${VERSION}-macos-x86_64.zip DicodeConfigChecker-v${VERSION}-macos-x86_64)
+          (cd pkg-arm64 && zip -qry ../DicodeConfigChecker-v${VERSION}-macos-arm64.zip DicodeConfigChecker-v${VERSION}-macos-arm64)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            DicodeConfigChecker-v${VERSION}-macos-x86_64.zip
+            DicodeConfigChecker-v${VERSION}-macos-arm64.zip
+          if-no-files-found: error
+
   android:
     needs: test
     runs-on: ubuntu-latest
@@ -133,7 +255,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v2.0.0')
-    needs: [windows, android]
+    needs: [windows, linux, macos, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

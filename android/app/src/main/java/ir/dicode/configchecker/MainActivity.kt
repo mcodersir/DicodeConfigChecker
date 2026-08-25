@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -46,6 +47,7 @@ import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 private const val VERSION = "2.0.0"
+private const val SubscriptionPrefs = "dicode_subscription"
 private val Bg = Color(0xFF090D12)
 private val Card = Color(0xFF111821)
 private val Card2 = Color(0xFF0D141D)
@@ -91,6 +93,14 @@ private data class CheckResult(
     val error: String = "",
 )
 
+private data class SubscriptionPublishResult(
+    val repository: String,
+    val subChanged: Boolean,
+    val proxyChanged: Boolean,
+) {
+    val subUrl get() = "https://raw.githubusercontent.com/$repository/refs/heads/main/sub.txt"
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +131,10 @@ private fun DicodeApp() {
     var progress by remember { mutableFloatStateOf(0f) }
     var busy by remember { mutableStateOf(false) }
     var waitingDisconnect by remember { mutableStateOf(false) }
+    var creatingRepo by remember { mutableStateOf(false) }
+    val subPrefs = remember { context.getSharedPreferences(SubscriptionPrefs, Context.MODE_PRIVATE) }
+    var githubToken by rememberSaveable { mutableStateOf(subPrefs.getString("github_token", "").orEmpty()) }
+    var subRepo by rememberSaveable { mutableStateOf(subPrefs.getString("repository", "").orEmpty()) }
 
     MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Card)) {
         Scaffold(
@@ -196,9 +210,25 @@ private fun DicodeApp() {
                                     }
                                 }.onSuccess {
                                     results = it
-                                    files = writeOutputs(context.getExternalFilesDir(null)!!, it, settings)
+                                    val outputFiles = writeOutputs(context.getExternalFilesDir(null)!!, it, settings)
+                                    files = outputFiles
                                     status = "تست تمام شد؛ خروجی‌ها آماده‌اند"
                                     progress = 1f
+                                    if (githubToken.isNotBlank()) {
+                                        subPrefs.edit().putString("github_token", githubToken.trim()).apply()
+                                        runCatching {
+                                            withContext(Dispatchers.IO) { publishPersonalSubscription(context, githubToken.trim(), outputFiles) }
+                                        }.onSuccess { published ->
+                                            if (published != null) {
+                                                subRepo = published.repository
+                                                status = if (published.subChanged || published.proxyChanged) "تست تمام شد؛ ساب اختصاصی به‌روز شد" else "تست تمام شد؛ ساب اختصاصی بدون تغییر بود"
+                                                logs = (logs + "[SUB] ${published.subUrl}").takeLast(160)
+                                            }
+                                        }.onFailure {
+                                            status = "انتشار ساب اختصاصی ناموفق بود؛ از تنظیمات دوباره امتحان کنید"
+                                            logs = (logs + "[SUB] ERROR ${it.message}").takeLast(160)
+                                        }
+                                    }
                                 }.onFailure {
                                     status = "خطا در تست: ${it.message}"
                                     logs = logs + "ERROR ${it.javaClass.simpleName}: ${it.message}"
@@ -211,7 +241,33 @@ private fun DicodeApp() {
                         },
                         onOpenOutputs = { files.firstOrNull()?.let { share(context, it) } },
                     )
-                    Page.Settings -> SettingsPage(settings, onChange = { settings = it })
+                    Page.Settings -> SettingsPage(
+                        settings,
+                        onChange = { settings = it },
+                        githubToken = githubToken,
+                        subRepo = subRepo,
+                        onTokenChange = {
+                            githubToken = it
+                            subPrefs.edit().putString("github_token", it.trim()).apply()
+                        },
+                        creatingRepo = creatingRepo,
+                        onCreateRepo = {
+                            creatingRepo = true
+                            scope.launch {
+                                runCatching { withContext(Dispatchers.IO) { ensurePersonalSubscriptionRepository(context, githubToken.trim(), subRepo) } }
+                                    .onSuccess { ready ->
+                                        if (ready.isNullOrBlank()) status = "ابتدا توکن گیت‌هاب را وارد کنید."
+                                        else {
+                                            subRepo = ready
+                                            status = "ریپازیتوری ساب آماده است؛ پس از تست بعدی منتشر می‌شود."
+                                            logs = (logs + "[SUB] https://raw.githubusercontent.com/$ready/refs/heads/main/sub.txt").takeLast(160)
+                                        }
+                                    }
+                                    .onFailure { status = "اتصال گیت‌هاب ناموفق بود: ${it.message}" }
+                                creatingRepo = false
+                            }
+                        },
+                    )
                     Page.Channels -> ChannelsPage(priority1, priority2, onPriority1 = { priority1 = it }, onPriority2 = { priority2 = it })
                     Page.Configs -> OutputPage("کانفیگ‌ها", results.filter { !it.item.proxy }, files.firstOrNull { it.name == "sub.txt" }, context)
                     Page.Proxies -> OutputPage("پروکسی‌ها", results.filter { it.item.proxy }, files.firstOrNull { it.name == "proxy.txt" }, context)
@@ -265,7 +321,15 @@ private fun DashboardPage(
 }
 
 @Composable
-private fun SettingsPage(value: SettingsState, onChange: (SettingsState) -> Unit) {
+private fun SettingsPage(
+    value: SettingsState,
+    onChange: (SettingsState) -> Unit,
+    githubToken: String,
+    subRepo: String,
+    onTokenChange: (String) -> Unit,
+    creatingRepo: Boolean,
+    onCreateRepo: () -> Unit,
+) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PageHeader("تنظیمات", "کنترل سرعت و دقت بررسی")
         Panel {
@@ -282,6 +346,22 @@ private fun SettingsPage(value: SettingsState, onChange: (SettingsState) -> Unit
             Toggle("بررسی کانفیگ‌های Xray", value.checkConfigs) { onChange(value.copy(checkConfigs = it)) }
             Toggle("بررسی پروکسی‌های تلگرام", value.checkProxies) { onChange(value.copy(checkProxies = it)) }
             Toggle("پیش‌فیلتر سریع TCP", value.tcpPrefilter) { onChange(value.copy(tcpPrefilter = it)) }
+        }
+        Panel {
+            Text("ساب اختصاصی GitHub", color = Text, fontWeight = FontWeight.Bold)
+            OutlinedTextField(
+                value = githubToken,
+                onValueChange = onTokenChange,
+                label = { Text("توکن Classic PAT با دسترسی public_repo") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (subRepo.isNotBlank()) Text("ریپازیتوری ساب: $subRepo", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Button(onClick = onCreateRepo, enabled = !creatingRepo && githubToken.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+                Text(if (creatingRepo) "در حال ساخت…" else "ساخت / اتصال ریپازیتوری ساب")
+            }
+            Text("پس از هر تست موفق، sub.txt و proxy.txt به‌صورت خودکار در این ریپازیتوری منتشر می‌شوند.", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         Text("کانفیگ‌های سازگار با درخواست HTTP واقعی بررسی می‌شوند؛ پروکسی‌های Telegram تست TCP مستقل دارند.", color = Muted)
     }
@@ -537,6 +617,67 @@ private fun writeOutputs(root: File, results: List<CheckResult>, settings: Setti
 }
 
 private fun renameConfig(raw: String, name: String): String = raw.substringBefore('#') + "#" + Uri.encode(name)
+
+private class GitHubRequestError(val status: Int, message: String) : Exception(message)
+
+private fun githubJson(token: String, method: String, path: String, body: JSONObject? = null): JSONObject {
+    val conn = URL("https://api.github.com$path").openConnection() as HttpURLConnection
+    conn.requestMethod = method
+    conn.connectTimeout = 15000
+    conn.readTimeout = 20000
+    conn.setRequestProperty("Authorization", "Bearer $token")
+    conn.setRequestProperty("Accept", "application/vnd.github+json")
+    conn.setRequestProperty("User-Agent", "Mozilla/5.0 DicodeConfigChecker/$VERSION")
+    if (body != null) {
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+    }
+    val code = conn.responseCode
+    val text = (if (code < 400) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
+    if (code >= 400) throw GitHubRequestError(code, "HTTP $code")
+    return if (text.isBlank()) JSONObject() else JSONObject(text)
+}
+
+private fun ensurePersonalSubscriptionRepository(context: Context, token: String, existing: String): String? {
+    if (token.isBlank()) return null
+    var repo = existing.trim()
+    if (!repo.contains('/')) {
+        val owner = githubJson(token, "GET", "/user").optString("login")
+        if (owner.isBlank()) throw IllegalStateException("GitHub account not found")
+        val name = "dicode-${(1_000_000..9_999_999).random()}-DIC"
+        val created = githubJson(token, "POST", "/user/repos", JSONObject()
+            .put("name", name).put("description", "Personal Dicode Config Checker subscription output")
+            .put("private", false).put("auto_init", true).put("has_issues", false).put("has_projects", false).put("has_wiki", false))
+        repo = "${created.getJSONObject("owner").getString("login")}/${created.getString("name")}"
+        context.getSharedPreferences(SubscriptionPrefs, Context.MODE_PRIVATE).edit().putString("repository", repo).apply()
+    }
+    return repo
+}
+
+private fun putGithubFile(token: String, repo: String, filename: String, value: String): Boolean {
+    val path = "/repos/$repo/contents/$filename"
+    val current = try { githubJson(token, "GET", path) } catch (error: GitHubRequestError) {
+        if (error.status == 404) null else throw error
+    }
+    val sha = current?.optString("sha").orEmpty()
+    val previous = current?.optString("content").orEmpty().replace("\n", "")
+    if (previous.isNotBlank() && String(Base64.decode(previous, Base64.DEFAULT), Charsets.UTF_8) == value) return false
+    val body = JSONObject().put("message", "Update $filename from Dicode Config Checker")
+        .put("content", Base64.encodeToString(value.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)).put("branch", "main")
+    if (sha.isNotBlank()) body.put("sha", sha)
+    githubJson(token, "PUT", path, body)
+    return true
+}
+
+private fun publishPersonalSubscription(context: Context, token: String, files: List<File>): SubscriptionPublishResult? {
+    val saved = context.getSharedPreferences(SubscriptionPrefs, Context.MODE_PRIVATE).getString("repository", "").orEmpty()
+    val repo = ensurePersonalSubscriptionRepository(context, token, saved) ?: return null
+    val byName = files.associateBy { it.name }
+    val subChanged = putGithubFile(token, repo, "sub.txt", byName["sub.txt"]?.readText().orEmpty())
+    val proxyChanged = putGithubFile(token, repo, "proxy.txt", byName["proxy.txt"]?.readText().orEmpty())
+    return SubscriptionPublishResult(repo, subChanged, proxyChanged)
+}
 
 private fun share(context: Context, file: File) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)

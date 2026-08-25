@@ -25,6 +25,7 @@ alive_report.txt
 proxy_report.txt
 report.json
 run_log.txt
+.tools/
 .env
 .env.*
 !.env.example

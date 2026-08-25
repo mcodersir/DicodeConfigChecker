@@ -41,7 +41,7 @@ dotnet run --project tests/DicodeConfigChecker.Tests -c Release
 dotnet publish src/DicodeConfigChecker.Desktop -c Release -r win-x64 --self-contained true
 ```
 
-runtimeها هنگام Release توسط GitHub Actions با نسخه‌های ثابت به بسته Windows اضافه می‌شوند. برای اجرای توسعه‌ای می‌توانید فایل‌های اجرایی را با نام‌های `core-a.exe` و `core-b.exe` داخل پوشه `runtimes` قرار دهید یا مسیرشان را در `DICODE_CORE_A` و `DICODE_CORE_B` تنظیم کنید.
+بسته‌های رسمی برای `win-x64`، `linux-x64`، `osx-x64` و `osx-arm64` ساخته می‌شوند و runtimeهای نسخه‌ثابت و GeoFiles داخل هر بسته قرار دارند. فونت وزیرمتن نیز همراه بسته‌ها ارائه می‌شود. برای اجرای توسعه‌ای می‌توانید فایل‌های اجرایی را با نام‌های `core-a` و `core-b` (در ویندوز با پسوند `.exe`) داخل پوشه `runtimes` قرار دهید یا مسیرشان را در `DICODE_CORE_A` و `DICODE_CORE_B` تنظیم کنید.
 
 ## ساخت Android
 

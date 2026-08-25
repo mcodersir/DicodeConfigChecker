@@ -11,6 +11,7 @@
 - موارد شکست‌خورده یک بار در batch جداگانه retry می‌شوند؛ موارد سالم بی‌دلیل دوباره اجرا نمی‌شوند.
 - نتیجه با median مرتب می‌شود و min، average، attempts و success count نیز در گزارش باقی می‌ماند.
 - تست TCP پروکسی‌های Telegram از تست واقعی کانفیگ جدا و شفاف گزارش می‌شود.
+- انتشار ساب اختصاصی GitHub در اندروید بازگردانده شد؛ پس از هر تست موفق، sub.txt و proxy.txt به‌صورت خودکار منتشر می‌شوند.
 
 ## هسته‌ها و GeoFiles
 
@@ -21,22 +22,27 @@
 
 ## رابط کاربری
 
-- Windows: رابط WPF فارسی، سبک و سه‌بخشی شامل داشبورد، نتایج و تنظیمات.
-- Android: جمع‌آوری و تست موازی کنترل‌شده، نمایش ساده‌تر وضعیت و خروجی‌های قابل اشتراک.
+- Windows: رابط WPF فارسی، سبک و سه‌بخشی شامل داشبورد، نتایج و تنظیمات؛ پوسته روشن، تیره و هماهنگ با سیستم.
+- فونت فارسی وزیرمتن همراه بستهٔ دسکتاپ ارائه می‌شود تا رابط روی همه سیستم‌ها یکسان دیده شود.
+- Android: جمع‌آوری و تست موازی کنترل‌شده، نمایش ساده‌تر وضعیت، انتشار ساب GitHub و خروجی‌های قابل اشتراک.
 - عملیات طولانی قابل توقف است و پیشرفت مرحله‌ای نمایش داده می‌شود.
 - خروجی‌ها به‌صورت خودکار در پوشه مشخص نوشته می‌شوند.
 
 ## انتشار و کنترل کیفیت
 
-- Desktop: `2.0.0`
+- Desktop: `2.0.0` برای Windows و Linux و macOS
 - Android: `versionCode 200` و `versionName 2.0.0`
 - Release: پایدار، `prerelease=false`، `draft=false` و Latest
 - build دسکتاپ با warning-as-error، تست‌های regression و Android lint دروازه انتشار هستند.
+- هسته‌های شبکه برای هر چهار بسته با نسخه ثابت و راستی‌آزمایی SHA256 همراه بسته می‌شوند.
 - فایل‌های انتشار همراه `SHA256SUMS.txt` و `provenance.json` ارائه می‌شوند.
 
 ## فایل‌ها
 
 - `DicodeConfigChecker-v2.0.0-windows-x64.zip`
+- `DicodeConfigChecker-v2.0.0-linux-x86_64.tar.gz`
+- `DicodeConfigChecker-v2.0.0-macos-x86_64.zip`
+- `DicodeConfigChecker-v2.0.0-macos-arm64.zip`
 - `DicodeConfigChecker-v2.0.0-android.apk`
 - `DicodeConfigChecker-v2.0.0-source.zip`
 - `SHA256SUMS.txt`
