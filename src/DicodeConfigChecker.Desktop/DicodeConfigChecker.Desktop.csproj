@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Dicode.ConfigChecker.Desktop</RootNamespace>
+    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DicodeConfigChecker.Core\DicodeConfigChecker.Core.csproj" />
+    <Content Include="..\..\channels.txt" Link="channels.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\runtimes')" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,150 @@
+name: Version 2 stable
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: [v2.0.0]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dicode-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERSION: 2.0.0
+  CORE_A_VERSION: v26.3.27
+  CORE_B_VERSION: 1.13.15
+  CORE_B_SHA256: 599b296f6e57511d36d2a6f3011aed1a86fa98418578bbb06bd6dc241b5d8877
+  GEO_VERSION: 202608052252
+  ANDROID_CORE_COMMIT: ecf84ee82ac975c39852397351d1618a40df7cd2
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 8.0.x }
+      - name: Build C# with warnings as errors
+        run: dotnet build DicodeConfigChecker.sln -c Release -warnaserror
+      - name: Run regression suite
+        run: dotnet run --project tests/DicodeConfigChecker.Tests -c Release --no-build
+      - name: Validate Android source version
+        shell: pwsh
+        run: |
+          Select-String 'private const val VERSION = "2.0.0"' android/app/src/main/java/ir/dicode/configchecker/MainActivity.kt -Quiet | Out-Null
+          Select-String 'versionCode = 200' android/app/build.gradle.kts -Quiet | Out-Null
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 8.0.x }
+      - name: Add pinned network runtimes and GeoFiles
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force runtimes | Out-Null
+          Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/download/${{ env.CORE_A_VERSION }}/Xray-windows-64.zip" -OutFile core-a.zip
+          Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/download/${{ env.CORE_A_VERSION }}/Xray-windows-64.zip.dgst" -OutFile core-a.dgst
+          $coreAMatch = [regex]::Match((Get-Content core-a.dgst -Raw), '(?im)^SHA2?-?256.*?([0-9a-f]{64})\s*$')
+          if (-not $coreAMatch.Success) { throw 'Core A digest format was not recognized.' }
+          $coreAExpected = $coreAMatch.Groups[1].Value.ToLowerInvariant()
+          $coreAActual = (Get-FileHash core-a.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($coreAActual -ne $coreAExpected) { throw 'Core A integrity check failed.' }
+          Expand-Archive core-a.zip -DestinationPath core-a
+          Copy-Item core-a/xray.exe runtimes/core-a.exe
+          Invoke-WebRequest "https://github.com/SagerNet/sing-box/releases/download/v${{ env.CORE_B_VERSION }}/sing-box-${{ env.CORE_B_VERSION }}-windows-amd64.zip" -OutFile core-b.zip
+          $coreBActual = (Get-FileHash core-b.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($coreBActual -ne '${{ env.CORE_B_SHA256 }}') { throw 'Core B integrity check failed.' }
+          Expand-Archive core-b.zip -DestinationPath core-b
+          Copy-Item "core-b/sing-box-${{ env.CORE_B_VERSION }}-windows-amd64/sing-box.exe" runtimes/core-b.exe
+          Invoke-WebRequest "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${{ env.GEO_VERSION }}/geoip.dat" -OutFile runtimes/geoip.dat
+          Invoke-WebRequest "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${{ env.GEO_VERSION }}/geosite.dat" -OutFile runtimes/geosite.dat
+          Invoke-WebRequest "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${{ env.GEO_VERSION }}/geoip.dat.sha256sum" -OutFile geoip.sha256sum
+          Invoke-WebRequest "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${{ env.GEO_VERSION }}/geosite.dat.sha256sum" -OutFile geosite.sha256sum
+          if ((Get-FileHash runtimes/geoip.dat -Algorithm SHA256).Hash.ToLowerInvariant() -ne ((Get-Content geoip.sha256sum) -split '\s+')[0].ToLowerInvariant()) { throw 'GeoIP integrity check failed.' }
+          if ((Get-FileHash runtimes/geosite.dat -Algorithm SHA256).Hash.ToLowerInvariant() -ne ((Get-Content geosite.sha256sum) -split '\s+')[0].ToLowerInvariant()) { throw 'GeoSite integrity check failed.' }
+          & runtimes/core-a.exe version
+          & runtimes/core-b.exe version
+      - name: Publish self-contained Windows x64
+        run: dotnet publish src/DicodeConfigChecker.Desktop -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+      - name: Package Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package/DicodeConfigChecker-v${{ env.VERSION }}-windows-x64 | Out-Null
+          Copy-Item publish/* package/DicodeConfigChecker-v${{ env.VERSION }}-windows-x64/ -Recurse
+          Copy-Item README.md,LICENSE,THIRD_PARTY_NOTICES.md package/DicodeConfigChecker-v${{ env.VERSION }}-windows-x64/
+          Compress-Archive package/DicodeConfigChecker-v${{ env.VERSION }}-windows-x64 DicodeConfigChecker-v${{ env.VERSION }}-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: DicodeConfigChecker-v${{ env.VERSION }}-windows-x64.zip
+          if-no-files-found: error
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: actions/setup-go@v6
+        with: { go-version: '1.25.8' }
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK and NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'ndk;29.0.14206865'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - name: Build pinned mobile runtime
+        env: { GOTOOLCHAIN: auto }
+        run: |
+          git clone https://github.com/2dust/AndroidLibXrayLite.git /tmp/mobile-core
+          cd /tmp/mobile-core
+          git checkout "$ANDROID_CORE_COMMIT"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          mkdir -p assets data
+          bash gen_assets.sh download
+          cp data/*.dat assets/
+          gomobile init
+          go mod tidy
+          gomobile bind -v -androidapi 26 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' ./
+          mkdir -p "$GITHUB_WORKSPACE/android/app/libs"
+          cp libv2ray.aar "$GITHUB_WORKSPACE/android/app/libs/libv2ray.aar"
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.11.1' }
+      - name: Lint and build installable APK
+        run: |
+          gradle -p android :app:lintDebug :app:assembleDebug --stacktrace
+          cp android/app/build/outputs/apk/debug/app-debug.apk DicodeConfigChecker-v${VERSION}-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: DicodeConfigChecker-v${{ env.VERSION }}-android.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v2.0.0')
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: release, merge-multiple: true }
+      - name: Add integrity and provenance files
+        run: |
+          git archive --format=zip --output release/DicodeConfigChecker-v${VERSION}-source.zip HEAD
+          cd release
+          sha256sum DicodeConfigChecker-* > SHA256SUMS.txt
+          printf '{"version":"%s","commit":"%s","workflow":"%s"}\n' "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" > provenance.json
+      - name: Publish stable release
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: gh release create v${VERSION} release/* --verify-tag --title "Dicode Config Checker v${VERSION}" --notes-file RELEASE_NOTES_2.0.0.md --latest

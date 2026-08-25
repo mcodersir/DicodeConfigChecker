@@ -1,0 +1,24 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DicodeConfigChecker.Core", "src\DicodeConfigChecker.Core\DicodeConfigChecker.Core.csproj", "{5A185F7F-BE77-48DA-B8B9-B70D44D46C25}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DicodeConfigChecker.Desktop", "src\DicodeConfigChecker.Desktop\DicodeConfigChecker.Desktop.csproj", "{D54C479A-E06F-41CD-9D83-A884F0373D1D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DicodeConfigChecker.Tests", "tests\DicodeConfigChecker.Tests\DicodeConfigChecker.Tests.csproj", "{77BD671B-A702-4D44-A1AF-43DF89B9E7D5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5A185F7F-BE77-48DA-B8B9-B70D44D46C25}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5A185F7F-BE77-48DA-B8B9-B70D44D46C25}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D54C479A-E06F-41CD-9D83-A884F0373D1D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D54C479A-E06F-41CD-9D83-A884F0373D1D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77BD671B-A702-4D44-A1AF-43DF89B9E7D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77BD671B-A702-4D44-A1AF-43DF89B9E7D5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

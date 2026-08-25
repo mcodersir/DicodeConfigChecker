@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+bin/
+obj/
+.vs/
+.idea/
 build/
 dist/
 *.spec
@@ -9,6 +13,8 @@ release/
 *.zip
 core/xray.exe
 core/xray
+runtimes/core-a.exe
+runtimes/core-b.exe
 all_configs_stage1.txt
 stage1_report.json
 sub.txt
