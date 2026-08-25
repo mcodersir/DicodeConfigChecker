@@ -10,7 +10,9 @@
 - Median, minimum, average, success-count and tester metadata.
 - Failed-only retry pass, bounded concurrency and cancellation.
 - Version-pinned GeoFiles and runtime packaging.
-- Reproducible Windows/Android release workflow with checksums and provenance.
+- Reproducible Windows/Linux/macOS/Android release workflow with checksums and provenance.
+- Bundled Vazirmatn font so the Persian desktop UI renders identically everywhere.
+- Android GitHub subscription publishing (auto-publish sub.txt/proxy.txt after a successful test).
 
 ### Changed
 

@@ -34,7 +34,7 @@ body:
     attributes:
       label: محتوای اصلی کانال
       options:
-        - کانفیگ V2Ray/Xray
+        - کانفیگ VLESS/VMess/Trojan
         - پروکسی Telegram
         - هر دو
         - سایر موارد مرتبط
