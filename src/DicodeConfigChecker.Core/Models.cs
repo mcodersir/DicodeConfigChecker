@@ -27,21 +27,21 @@ public sealed record DelayResult(
 
 public sealed record TestOptions(
     Uri TestUrl,
-    int Attempts = 2,
-    int MinimumSuccesses = 1,
+    int Attempts = 3,
+    int MinimumSuccesses = 2,
     int PageSize = 32,
-    int Parallelism = 16,
+    int Parallelism = 32,
     TimeSpan? RequestTimeout = null,
     TimeSpan? StartupTimeout = null)
 {
-    public TimeSpan EffectiveRequestTimeout => RequestTimeout ?? TimeSpan.FromSeconds(8);
-    public TimeSpan EffectiveStartupTimeout => StartupTimeout ?? TimeSpan.FromSeconds(6);
+    public TimeSpan EffectiveRequestTimeout => RequestTimeout ?? TimeSpan.FromSeconds(6);
+    public TimeSpan EffectiveStartupTimeout => StartupTimeout ?? TimeSpan.FromSeconds(5);
 }
 
 public sealed record CollectOptions(
     int PriorityOneLimit = 30,
     int PriorityTwoLimit = 20,
-    int Parallelism = 8);
+    int Parallelism = 10);
 
 public enum AppTheme { System, Light, Dark }
 
@@ -56,11 +56,11 @@ public sealed record AppSettings(
     string PriorityTwoChannels = "",
     int PriorityOneLimit = 30,
     int PriorityTwoLimit = 20,
-    int FetchParallelism = 8,
-    int TestParallelism = 16,
+    int FetchParallelism = 10,
+    int TestParallelism = 32,
     int PageSize = 32,
-    int Attempts = 4,
-    int MinimumSuccesses = 3,
+    int Attempts = 3,
+    int MinimumSuccesses = 2,
     string TestUrl = "https://www.gstatic.com/generate_204",
     bool CheckConfigs = true,
     bool CheckTelegramProxies = true,

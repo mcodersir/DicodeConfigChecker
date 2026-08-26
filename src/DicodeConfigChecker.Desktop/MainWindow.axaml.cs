@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -42,8 +43,8 @@ public partial class MainWindow : Window
 
     private AppSettings ReadSettings() => new(
         PriorityOneChannels.Text ?? "", PriorityTwoChannels.Text ?? "", Number(PriorityOneLimit, 30), Number(PriorityTwoLimit, 20),
-        Number(FetchWorkers, 8), Number(TestWorkers, 16), Number(PageSize, 32), Number(Attempts, 4),
-        Math.Min(Number(MinimumSuccess, 3), Number(Attempts, 4)), TestUrl.Text?.Trim() ?? "", CheckConfigs.IsChecked == true,
+        Number(FetchWorkers, 10), Number(TestWorkers, 32), Number(PageSize, 32), Number(Attempts, 3),
+        Math.Min(Number(MinimumSuccess, 2), Number(Attempts, 3)), TestUrl.Text?.Trim() ?? "", CheckConfigs.IsChecked == true,
         CheckProxies.IsChecked == true, RenameConfigs.IsChecked == true, NamePrefix.Text?.Trim() ?? "t.me/dicodeir", true,
         (AppTheme)Math.Clamp(ThemeBox.SelectedIndex, 0, 2), GitHubToken.Text?.Trim() ?? "", SubscriptionRepo.Text?.Trim() ?? "");
 
@@ -81,19 +82,17 @@ public partial class MainWindow : Window
         if (_operation is not null || _collected.Count == 0) return;
         SaveState();
         if (!Uri.TryCreate(_settings.TestUrl, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https")) { SetStatus("URL تست واقعی معتبر نیست."); return; }
-        _operation = new(); ToggleBusy(true); DisconnectHint.IsVisible = false; var complete = new List<DelayResult>(); var total = _collected.Count; var done = 0;
+        _operation = new(); ToggleBusy(true); DisconnectHint.IsVisible = false; var complete = new List<DelayResult>(); var total = _collected.Count;
         try
         {
-            foreach (var page in _collected.Chunk(Math.Clamp(_settings.PageSize, 1, 128)))
-            {
-                var pageProgress = new Progress<ProgressInfo>(p => { RunProgress.Value = Percent(done + p.Completed, total); SetStatus($"تست واقعی: {done + p.Completed} از {total}"); });
-                var service = new LatencyTestService(_runtimes);
-                var result = await service.TestAsync(page, new(url, _settings.Attempts, _settings.MinimumSuccesses, _settings.PageSize, _settings.TestParallelism), pageProgress, _operation.Token);
-                complete.AddRange(result); done += page.Length; _results = complete.ToArray(); RefreshMetrics();
-            }
+            // Flat-batch: pass ALL candidates to one TestAsync call.
+            var progress = new Progress<ProgressInfo>(p => { RunProgress.Value = Percent(p.Completed, total); SetStatus($"تست واقعی: {p.Completed} از {total}"); });
+            var service = new LatencyTestService(_runtimes);
+            complete = (await service.TestAsync(_collected, new(url, _settings.Attempts, _settings.MinimumSuccesses, _settings.PageSize, _settings.TestParallelism), progress, _operation.Token)).ToList();
+            _results = complete; RefreshMetrics();
             SetStatus($"تست تمام شد؛ {_results.Count(x => x.IsAlive)} سالم از {_results.Count}.");
         }
-        catch (OperationCanceledException) { SetStatus($"تست موقتاً متوقف شد؛ {complete.Count} نتیجه حفظ شد. برای ادامه دوباره مرحلهٔ دوم را بزنید."); }
+        catch (OperationCanceledException) { SetStatus($"تست موقتاً متوقف شد؛ {complete.Count} نتیجه حفظ شد."); }
         catch (Exception ex) { SetStatus("خطای تست: " + ex.Message); Log("ERROR " + ex); }
         finally
         {
@@ -161,7 +160,17 @@ public partial class MainWindow : Window
 
     private async void CopyConfigs_Click(object? sender, RoutedEventArgs e) => await CopyAsync(ConfigOutput.Text ?? "");
     private async void CopyProxies_Click(object? sender, RoutedEventArgs e) => await CopyAsync(ProxyOutput.Text ?? "");
-    private async Task CopyAsync(string text) { var clipboard = TopLevel.GetTopLevel(this)?.Clipboard; if (clipboard is not null) await clipboard.SetTextAsync(text); SetStatus("در کلیپ‌بورد کپی شد."); }
+    private async Task CopyAsync(string text)
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is not null && !string.IsNullOrEmpty(text))
+        {
+            var data = new DataTransfer();
+            data.Add(DataTransferItem.Create(DataFormat.Text, text));
+            await clipboard.SetDataAsync(data);
+        }
+        SetStatus("در کلیپ‌بورد کپی شد.");
+    }
     private void OpenOutput_Click(object? sender, RoutedEventArgs e) => OpenExternal(UserData.OutputDirectory);
 
     private void ThemeBox_Changed(object? sender, SelectionChangedEventArgs e) { var theme = (AppTheme)Math.Clamp(ThemeBox.SelectedIndex, 0, 2); ApplyTheme(theme); }

@@ -34,6 +34,7 @@ internal sealed class BatchRuntime : IAsyncDisposable
         {
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             startup.CancelAfter(timeout);
+            // Wait for ALL ports to be open — fastest-wins.
             await Task.WhenAll(ports.Values.Select(port => WaitForPortAsync(port, process, startup.Token)));
             return session;
         }
@@ -50,12 +51,26 @@ internal sealed class BatchRuntime : IAsyncDisposable
         for (var i = 0; i < candidates.Count; i++)
         {
             var inboundTag = $"in-{i}"; var outboundTag = $"out-{i}";
-            inbounds.Add(new JsonObject { ["tag"] = inboundTag, ["listen"] = "127.0.0.1", ["port"] = ports[candidates[i]], ["protocol"] = "socks", ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = true } });
+            inbounds.Add(new JsonObject
+            {
+                ["tag"] = inboundTag,
+                ["listen"] = "127.0.0.1",
+                ["port"] = ports[candidates[i]],
+                ["protocol"] = "socks",
+                ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = true },
+                ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = new JsonArray("http", "tls", "quic") }
+            });
             var outbound = candidates[i].Outbound!.DeepClone().AsObject(); outbound["tag"] = outboundTag; outbounds.Add(outbound);
             rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray(inboundTag), ["outboundTag"] = outboundTag });
         }
         outbounds.Add(new JsonObject { ["tag"] = "direct", ["protocol"] = "freedom" });
-        return new JsonObject { ["log"] = new JsonObject { ["loglevel"] = "warning" }, ["inbounds"] = inbounds, ["outbounds"] = outbounds, ["routing"] = new JsonObject { ["domainStrategy"] = "IPIfNonMatch", ["rules"] = rules } };
+        return new JsonObject
+        {
+            ["log"] = new JsonObject { ["loglevel"] = "warning" },
+            ["inbounds"] = inbounds,
+            ["outbounds"] = outbounds,
+            ["routing"] = new JsonObject { ["domainStrategy"] = "IPIfNonMatch", ["rules"] = rules }
+        };
     }
 
     private static JsonObject SingBoxConfig(IReadOnlyList<Candidate> candidates, IReadOnlyDictionary<Candidate, int> ports)
@@ -64,12 +79,26 @@ internal sealed class BatchRuntime : IAsyncDisposable
         for (var i = 0; i < candidates.Count; i++)
         {
             var inboundTag = $"in-{i}"; var outboundTag = $"out-{i}";
-            inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = inboundTag, ["listen"] = "127.0.0.1", ["listen_port"] = ports[candidates[i]] });
+            inbounds.Add(new JsonObject
+            {
+                ["type"] = "mixed",
+                ["tag"] = inboundTag,
+                ["listen"] = "127.0.0.1",
+                ["listen_port"] = ports[candidates[i]],
+                ["sniff"] = true,
+                ["sniff_override_destination"] = true
+            });
             var outbound = candidates[i].Outbound!.DeepClone().AsObject(); outbound["tag"] = outboundTag; outbounds.Add(outbound);
             rules.Add(new JsonObject { ["inbound"] = new JsonArray(inboundTag), ["action"] = "route", ["outbound"] = outboundTag });
         }
         outbounds.Add(new JsonObject { ["type"] = "direct", ["tag"] = "direct" });
-        return new JsonObject { ["log"] = new JsonObject { ["level"] = "warn", ["timestamp"] = false }, ["inbounds"] = inbounds, ["outbounds"] = outbounds, ["route"] = new JsonObject { ["rules"] = rules, ["final"] = "direct" } };
+        return new JsonObject
+        {
+            ["log"] = new JsonObject { ["level"] = "warn", ["timestamp"] = false },
+            ["inbounds"] = inbounds,
+            ["outbounds"] = outbounds,
+            ["route"] = new JsonObject { ["rules"] = rules, ["final"] = "direct" }
+        };
     }
 
     private static int FreePort()
@@ -80,11 +109,12 @@ internal sealed class BatchRuntime : IAsyncDisposable
 
     private static async Task WaitForPortAsync(int port, Process process, CancellationToken cancellationToken)
     {
+        // Poll every 15ms for fast startup detection.
         while (!cancellationToken.IsCancellationRequested)
         {
             if (process.HasExited) throw new InvalidOperationException($"Runtime exited with code {process.ExitCode}.");
             try { using var socket = new TcpClient(); await socket.ConnectAsync(IPAddress.Loopback, port, cancellationToken); return; }
-            catch (SocketException) { await Task.Delay(40, cancellationToken); }
+            catch (SocketException) { await Task.Delay(15, cancellationToken); }
         }
         cancellationToken.ThrowIfCancellationRequested();
     }

@@ -7,7 +7,7 @@
         <StackPanel>
           <Border Width="44" Height="44" CornerRadius="14" Background="#2167E8" HorizontalAlignment="Right"><PathIcon Data="M12,2 L15,9 L22,12 L15,15 L12,22 L9,15 L2,12 L9,9 Z" Foreground="White" Width="22"/></Border>
           <TextBlock Text="Dicode Config Checker" FontWeight="Bold" Margin="0,10,0,0"/>
-          <TextBlock Text="نسخه ۲ • چهارسکویی" Classes="muted" FontSize="12"/>
+          <TextBlock Text="نسخهٔ ۲ • پایدار" Classes="muted" FontSize="12"/>
         </StackPanel>
         <StackPanel Grid.Row="2">
           <Button Classes="nav" Click="Dashboard_Click"><StackPanel Orientation="Horizontal" Spacing="10"><PathIcon Data="M3,3 H10 V10 H3 Z M14,3 H21 V10 H14 Z M3,14 H10 V21 H3 Z M14,14 H21 V21 H14 Z" Width="18"/><TextBlock Text="داشبورد"/></StackPanel></Button>
@@ -51,12 +51,12 @@
           <Border Classes="card"><Grid ColumnDefinitions="*,14,*" RowDefinitions="Auto,Auto,Auto,Auto">
             <TextBlock Text="سقف کانال رتبه اول"/><NumericUpDown x:Name="PriorityOneLimit" Grid.Row="1" Minimum="1" Maximum="1000" Value="30"/>
             <TextBlock Grid.Column="2" Text="سقف کانال رتبه دوم"/><NumericUpDown x:Name="PriorityTwoLimit" Grid.Row="1" Grid.Column="2" Minimum="1" Maximum="300" Value="20"/>
-            <TextBlock Grid.Row="2" Margin="0,12,0,0" Text="دریافت موازی"/><NumericUpDown x:Name="FetchWorkers" Grid.Row="3" Minimum="1" Maximum="64" Value="8"/>
-            <TextBlock Grid.Row="2" Grid.Column="2" Margin="0,12,0,0" Text="تست موازی"/><NumericUpDown x:Name="TestWorkers" Grid.Row="3" Grid.Column="2" Minimum="1" Maximum="128" Value="16"/>
+            <TextBlock Grid.Row="2" Margin="0,12,0,0" Text="دریافت موازی"/><NumericUpDown x:Name="FetchWorkers" Grid.Row="3" Minimum="1" Maximum="64" Value="10"/>
+            <TextBlock Grid.Row="2" Grid.Column="2" Margin="0,12,0,0" Text="تست موازی"/><NumericUpDown x:Name="TestWorkers" Grid.Row="3" Grid.Column="2" Minimum="1" Maximum="128" Value="32"/>
           </Grid></Border>
           <Border Classes="card"><Grid ColumnDefinitions="*,14,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
-            <TextBlock Text="تعداد تلاش"/><NumericUpDown x:Name="Attempts" Grid.Row="1" Minimum="1" Maximum="8" Value="4"/>
-            <TextBlock Grid.Column="2" Text="حداقل موفقیت"/><NumericUpDown x:Name="MinimumSuccess" Grid.Row="1" Grid.Column="2" Minimum="1" Maximum="8" Value="3"/>
+            <TextBlock Text="تعداد تلاش"/><NumericUpDown x:Name="Attempts" Grid.Row="1" Minimum="1" Maximum="8" Value="3"/>
+            <TextBlock Grid.Column="2" Text="حداقل موفقیت"/><NumericUpDown x:Name="MinimumSuccess" Grid.Row="1" Grid.Column="2" Minimum="1" Maximum="8" Value="2"/>
             <TextBlock Grid.Row="2" Margin="0,12,0,0" Text="اندازه batch"/><NumericUpDown x:Name="PageSize" Grid.Row="3" Minimum="1" Maximum="128" Value="32"/>
             <TextBlock Grid.Row="2" Grid.Column="2" Margin="0,12,0,0" Text="URL تست واقعی"/><TextBox x:Name="TestUrl" Grid.Row="3" Grid.Column="2" Text="https://www.gstatic.com/generate_204" FlowDirection="LeftToRight"/>
             <CheckBox x:Name="CheckConfigs" Grid.Row="4" Margin="0,14,0,0" Content="بررسی کانفیگ و ساخت sub.txt" IsChecked="True"/>
