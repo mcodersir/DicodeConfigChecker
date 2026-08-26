@@ -2,12 +2,14 @@ package ir.dicode.configchecker
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,8 +21,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -48,6 +54,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 private const val VERSION = "2.0.0"
 private const val SubscriptionPrefs = "dicode_subscription"
+private const val GeneralPrefs = "dicode_general"
+
+// Dark palette (default).
 private val Bg = Color(0xFF090D12)
 private val Card = Color(0xFF111821)
 private val Card2 = Color(0xFF0D141D)
@@ -56,6 +65,53 @@ private val Text = Color(0xFFEAF1FA)
 private val Muted = Color(0xFF9CAABC)
 private val Good = Color(0xFF22C55E)
 private val Bad = Color(0xFFEF4444)
+
+// Light palette.
+private val LightBg = Color(0xFFF4F7FB)
+private val LightCard = Color(0xFFFFFFFF)
+private val LightCard2 = Color(0xFFE9EFF6)
+private val LightAccent = Color(0xFF2563EB)
+private val LightText = Color(0xFF16212B)
+private val LightMuted = Color(0xFF5B6B7C)
+private val LightGood = Color(0xFF15803D)
+private val LightBad = Color(0xFFDC2626)
+
+private data class Palette(
+    val bg: Color,
+    val card: Color,
+    val card2: Color,
+    val accent: Color,
+    val text: Color,
+    val muted: Color,
+    val good: Color,
+    val bad: Color,
+    val dark: Boolean,
+)
+
+private val DarkPalette = Palette(Bg, Card, Card2, Accent, Text, Muted, Good, Bad, dark = true)
+private val LightPalette = Palette(LightBg, LightCard, LightCard2, LightAccent, LightText, LightMuted, LightGood, LightBad, dark = false)
+private val LocalPalette = staticCompositionLocalOf { DarkPalette }
+
+private enum class ThemeMode(val label: String) { System("سیستم"), Light("روشن"), Dark("تیره") }
+
+/** Thin wrapper around the bundled mobile network core binary. */
+private object MobileCore {
+    private var ready = false
+
+    fun init(context: Context) {
+        if (ready) return
+        runCatching {
+            Seq.setContext(context)
+            Libv2ray.initCoreEnv(context.filesDir.absolutePath, "")
+            ready = true
+        }
+    }
+
+    fun measureDelayMs(configJson: String, testUrl: String): Int =
+        Libv2ray.measureOutboundDelay(configJson, testUrl).toInt()
+
+    fun version(): String = runCatching { Libv2ray.checkVersionX() }.getOrDefault("unknown")
+}
 
 private enum class Page(val title: String) {
     Dashboard("داشبورد"), Settings("تنظیمات"), Channels("کانال‌ها"), Configs("کانفیگ‌ها"), Proxies("پروکسی‌ها")
@@ -105,10 +161,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        runCatching {
-            Seq.setContext(applicationContext)
-            Libv2ray.initCoreEnv(filesDir.absolutePath, "")
-        }
+        MobileCore.init(applicationContext)
         setContent { DicodeApp() }
     }
 }
@@ -117,11 +170,61 @@ class MainActivity : ComponentActivity() {
 private fun DicodeApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val general = remember { context.getSharedPreferences(GeneralPrefs, Context.MODE_PRIVATE) }
     var page by rememberSaveable { mutableStateOf(Page.Dashboard) }
-    var settings by remember { mutableStateOf(SettingsState()) }
-    var priority1 by rememberSaveable { mutableStateOf("t.me/dicodeir\nt.me/persianvpnhub") }
-    var priority2 by rememberSaveable {
-        mutableStateOf("t.me/PrivateVPNs\nt.me/vmess_ir\nt.me/V2ray_Alpha\nt.me/DailyV2RY")
+    var settings by remember { mutableStateOf(general.getString("settings", null)?.let(::settingsFromJson) ?: SettingsState()) }
+    var priority1 by rememberSaveable { mutableStateOf(general.getString("priority_one", null) ?: DefaultPriorityOne) }
+    var priority2 by rememberSaveable { mutableStateOf(general.getString("priority_two", null) ?: DefaultPriorityTwo) }
+    var themeMode by remember {
+        mutableStateOf(ThemeMode.entries.getOrElse(general.getInt("theme", ThemeMode.System.ordinal)) { ThemeMode.System })
+    }
+
+    fun updateSettings(next: SettingsState) {
+        settings = next
+        general.edit().putString("settings", settingsToJson(next)).apply()
+    }
+
+    fun setPriorityOne(value: String) {
+        priority1 = value
+        general.edit().putString("priority_one", value).apply()
+    }
+
+    fun setPriorityTwo(value: String) {
+        priority2 = value
+        general.edit().putString("priority_two", value).apply()
+    }
+
+    fun cycleTheme() {
+        themeMode = when (themeMode) {
+            ThemeMode.System -> ThemeMode.Light
+            ThemeMode.Light -> ThemeMode.Dark
+            ThemeMode.Dark -> ThemeMode.System
+        }
+        general.edit().putInt("theme", themeMode.ordinal).apply()
+    }
+
+    val palette = when (themeMode) {
+        ThemeMode.Dark -> DarkPalette
+        ThemeMode.Light -> LightPalette
+        ThemeMode.System -> if (isSystemInDarkTheme()) DarkPalette else LightPalette
+    }
+    val c = palette
+    val colorScheme = if (palette.dark) darkColorScheme(
+        primary = Accent, background = Bg, surface = Card, onPrimary = Color.White,
+        onBackground = Text, onSurface = Text, secondary = Muted, outline = Muted.copy(alpha = 0.45f),
+    ) else lightColorScheme(
+        primary = LightAccent, background = LightBg, surface = LightCard, onPrimary = Color.White,
+        onBackground = LightText, onSurface = LightText, secondary = LightMuted, outline = LightMuted.copy(alpha = 0.5f),
+    )
+    val vazir = rememberVazirmatn()
+    val view = LocalView.current
+    LaunchedEffect(palette.dark) {
+        (view.context as? android.app.Activity)?.window?.let { window ->
+            window.statusBarColor = (if (palette.dark) Bg else LightBg).toArgb()
+            window.navigationBarColor = (if (palette.dark) Card else LightCard).toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !palette.dark
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !palette.dark
+        }
     }
     var collected by remember { mutableStateOf<List<Candidate>>(emptyList()) }
     var results by remember { mutableStateOf<List<CheckResult>>(emptyList()) }
@@ -136,38 +239,51 @@ private fun DicodeApp() {
     var githubToken by rememberSaveable { mutableStateOf(subPrefs.getString("github_token", "").orEmpty()) }
     var subRepo by rememberSaveable { mutableStateOf(subPrefs.getString("repository", "").orEmpty()) }
 
-    MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Card)) {
+    CompositionLocalProvider(LocalPalette provides palette) {
+        MaterialTheme(colorScheme = colorScheme, typography = vazirmatnTypography(vazir)) {
         Scaffold(
-            containerColor = Bg,
+            containerColor = c.bg,
             contentWindowInsets = WindowInsets.safeDrawing,
             topBar = {
-                Surface(color = Card, tonalElevation = 0.dp) {
+                Surface(color = c.card, tonalElevation = 0.dp) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
-                            Modifier.size(42.dp).background(Card2, RoundedCornerShape(13.dp)),
+                            Modifier.size(42.dp).background(c.card2, RoundedCornerShape(13.dp)),
                             contentAlignment = Alignment.Center,
                         ) { Text("ϟ", color = Color(0xFF68E8FF), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black) }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("Dicode Config Checker", color = Text, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("Android • Real HTTP • v$VERSION", color = Muted, style = MaterialTheme.typography.labelMedium)
+                            Text("Dicode Config Checker", color = c.text, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("Android • Real HTTP • v$VERSION", color = c.muted, style = MaterialTheme.typography.labelMedium)
+                        }
+                        IconButton(onClick = ::cycleTheme) {
+                            Icon(painterResource(R.drawable.ic_theme), contentDescription = "پوسته: ${themeMode.label}")
                         }
                         AssistChip(onClick = {}, label = { Text(if (busy) "در حال اجرا" else "آماده") })
                     }
                 }
             },
             bottomBar = {
-                NavigationBar(containerColor = Card) {
+                NavigationBar(containerColor = c.card) {
                     Page.entries.forEach { item ->
                         NavigationBarItem(
                             selected = page == item,
                             onClick = { page = item },
-                            icon = { Text(when (item) {
-                                Page.Dashboard -> "⌂"; Page.Settings -> "⚙"; Page.Channels -> "≡"; Page.Configs -> "✓"; Page.Proxies -> "ϟ"
-                            }) },
+                            icon = {
+                                Icon(
+                                    painterResource(when (item) {
+                                        Page.Dashboard -> R.drawable.ic_nav_dashboard
+                                        Page.Settings -> R.drawable.ic_nav_settings
+                                        Page.Channels -> R.drawable.ic_nav_channels
+                                        Page.Configs -> R.drawable.ic_nav_configs
+                                        Page.Proxies -> R.drawable.ic_nav_proxies
+                                    }),
+                                    contentDescription = item.title,
+                                )
+                            },
                             label = { Text(item.title, maxLines = 1) },
                         )
                     }
@@ -243,7 +359,7 @@ private fun DicodeApp() {
                     )
                     Page.Settings -> SettingsPage(
                         settings,
-                        onChange = { settings = it },
+                        onChange = { updateSettings(it) },
                         githubToken = githubToken,
                         subRepo = subRepo,
                         onTokenChange = {
@@ -268,13 +384,87 @@ private fun DicodeApp() {
                             }
                         },
                     )
-                    Page.Channels -> ChannelsPage(priority1, priority2, onPriority1 = { priority1 = it }, onPriority2 = { priority2 = it })
+                    Page.Channels -> ChannelsPage(priority1, priority2, onPriority1 = { setPriorityOne(it) }, onPriority2 = { setPriorityTwo(it) })
                     Page.Configs -> OutputPage("کانفیگ‌ها", results.filter { !it.item.proxy }, files.firstOrNull { it.name == "sub.txt" }, context)
                     Page.Proxies -> OutputPage("پروکسی‌ها", results.filter { it.item.proxy }, files.firstOrNull { it.name == "proxy.txt" }, context)
                 }
             }
         }
+        }
     }
+}
+
+private const val DefaultPriorityOne = "t.me/dicodeir\nt.me/persianvpnhub"
+private const val DefaultPriorityTwo = "t.me/PrivateVPNs\nt.me/vmess_ir\nt.me/DirectVPN\nt.me/Everyday_VPN"
+
+private fun settingsToJson(value: SettingsState): String = JSONObject()
+    .put("perChannelLimit", value.perChannelLimit)
+    .put("priorityLimit", value.priorityLimit)
+    .put("fetchWorkers", value.fetchWorkers)
+    .put("attempts", value.attempts)
+    .put("minSuccess", value.minSuccess)
+    .put("checkUrl", value.checkUrl)
+    .put("tagPrefix", value.tagPrefix)
+    .put("renameNames", value.renameNames)
+    .put("checkConfigs", value.checkConfigs)
+    .put("checkProxies", value.checkProxies)
+    .put("tcpPrefilter", value.tcpPrefilter)
+    .toString()
+
+private fun settingsFromJson(text: String): SettingsState? = runCatching {
+    val obj = JSONObject(text)
+    SettingsState(
+        perChannelLimit = obj.optInt("perChannelLimit", 20),
+        priorityLimit = obj.optInt("priorityLimit", 30),
+        fetchWorkers = obj.optInt("fetchWorkers", 8),
+        attempts = obj.optInt("attempts", 2),
+        minSuccess = obj.optInt("minSuccess", 1),
+        checkUrl = obj.optString("checkUrl", "https://www.gstatic.com/generate_204"),
+        tagPrefix = obj.optString("tagPrefix", "t.me/dicodeir"),
+        renameNames = obj.optBoolean("renameNames", true),
+        checkConfigs = obj.optBoolean("checkConfigs", true),
+        checkProxies = obj.optBoolean("checkProxies", true),
+        tcpPrefilter = obj.optBoolean("tcpPrefilter", true),
+    )
+}.getOrNull()
+
+@Composable
+private fun rememberVazirmatn(): FontFamily {
+    val context = LocalContext.current
+    return remember {
+        runCatching {
+            val regular = Typeface.createFromAsset(context.assets, "Vazirmatn-Regular.ttf")
+            val medium = Typeface.createFromAsset(context.assets, "Vazirmatn-Medium.ttf")
+            val bold = Typeface.createFromAsset(context.assets, "Vazirmatn-Bold.ttf")
+            FontFamily(
+                Font(regular, FontWeight.Normal),
+                Font(medium, FontWeight.Medium),
+                Font(bold, FontWeight.Bold),
+                Font(bold, FontWeight.Black),
+            )
+        }.getOrDefault(FontFamily.SansSerif)
+    }
+}
+
+private fun vazirmatnTypography(family: FontFamily): Typography {
+    val base = Typography()
+    return base.copy(
+        displayLarge = base.displayLarge.copy(fontFamily = family),
+        displayMedium = base.displayMedium.copy(fontFamily = family),
+        displaySmall = base.displaySmall.copy(fontFamily = family),
+        headlineLarge = base.headlineLarge.copy(fontFamily = family),
+        headlineMedium = base.headlineMedium.copy(fontFamily = family),
+        headlineSmall = base.headlineSmall.copy(fontFamily = family),
+        titleLarge = base.titleLarge.copy(fontFamily = family),
+        titleMedium = base.titleMedium.copy(fontFamily = family),
+        titleSmall = base.titleSmall.copy(fontFamily = family),
+        bodyLarge = base.bodyLarge.copy(fontFamily = family),
+        bodyMedium = base.bodyMedium.copy(fontFamily = family),
+        bodySmall = base.bodySmall.copy(fontFamily = family),
+        labelLarge = base.labelLarge.copy(fontFamily = family),
+        labelMedium = base.labelMedium.copy(fontFamily = family),
+        labelSmall = base.labelSmall.copy(fontFamily = family),
+    )
 }
 
 @Composable
@@ -292,20 +482,21 @@ private fun DashboardPage(
     onOpenOutputs: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val c = LocalPalette.current
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Metric("دریافت", collected.size, Muted, Modifier.weight(1f))
-            Metric("سالم", results.count { it.ok }, Good, Modifier.weight(1f))
-            Metric("ناموفق", results.count { !it.ok }, Bad, Modifier.weight(1f))
-            Metric("تست واقعی", results.count { it.tester == "core-http" }, Accent, Modifier.weight(1f))
+            Metric("دریافت", collected.size, c.muted, Modifier.weight(1f))
+            Metric("سالم", results.count { it.ok }, c.good, Modifier.weight(1f))
+            Metric("ناموفق", results.count { !it.ok }, c.bad, Modifier.weight(1f))
+            Metric("تست واقعی", results.count { it.tester == "core-http" }, c.accent, Modifier.weight(1f))
         }
         Panel {
-            Text("وضعیت اجرا", color = Text, fontWeight = FontWeight.Bold)
-            Text(status, color = Muted)
+            Text("وضعیت اجرا", color = c.text, fontWeight = FontWeight.Bold)
+            Text(status, color = c.muted)
             LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp))
             if (waitingDisconnect) Text("قبل از ادامه، VPN یا کانفیگ فعلی را کامل قطع کن.", color = Color(0xFFFBBF24))
         }
         Panel {
-            Text("کنترل عملیات", color = Text, fontWeight = FontWeight.Bold)
+            Text("کنترل عملیات", color = c.text, fontWeight = FontWeight.Bold)
             Button(onClick = onCollect, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("۱. دریافت کانفیگ‌ها") }
             Button(onClick = onTest, enabled = !busy && collected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("۲. تست واقعی و ساخت خروجی") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -314,8 +505,8 @@ private fun DashboardPage(
             }
         }
         Panel {
-            Text("لاگ زنده", color = Text, fontWeight = FontWeight.Bold)
-            Text(if (logs.isEmpty()) "هنوز عملیاتی اجرا نشده" else logs.joinToString("\n"), color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text("لاگ زنده", color = c.text, fontWeight = FontWeight.Bold)
+            Text(if (logs.isEmpty()) "هنوز عملیاتی اجرا نشده" else logs.joinToString("\n"), color = c.muted, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -330,6 +521,7 @@ private fun SettingsPage(
     creatingRepo: Boolean,
     onCreateRepo: () -> Unit,
 ) {
+    val c = LocalPalette.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PageHeader("تنظیمات", "کنترل سرعت و دقت بررسی")
         Panel {
@@ -343,12 +535,12 @@ private fun SettingsPage(
             TextFieldRow("URL تست واقعی", value.checkUrl) { onChange(value.copy(checkUrl = it)) }
             TextFieldRow("متن نام کانفیگ", value.tagPrefix) { onChange(value.copy(tagPrefix = it)) }
             Toggle("بازنویسی نام کانفیگ", value.renameNames) { onChange(value.copy(renameNames = it)) }
-            Toggle("بررسی کانفیگ‌های Xray", value.checkConfigs) { onChange(value.copy(checkConfigs = it)) }
+            Toggle("بررسی کانفیگ‌ها", value.checkConfigs) { onChange(value.copy(checkConfigs = it)) }
             Toggle("بررسی پروکسی‌های تلگرام", value.checkProxies) { onChange(value.copy(checkProxies = it)) }
             Toggle("پیش‌فیلتر سریع TCP", value.tcpPrefilter) { onChange(value.copy(tcpPrefilter = it)) }
         }
         Panel {
-            Text("ساب اختصاصی GitHub", color = Text, fontWeight = FontWeight.Bold)
+            Text("ساب اختصاصی GitHub", color = c.text, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = githubToken,
                 onValueChange = onTokenChange,
@@ -357,26 +549,27 @@ private fun SettingsPage(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (subRepo.isNotBlank()) Text("ریپازیتوری ساب: $subRepo", color = Muted, style = MaterialTheme.typography.bodySmall)
+            if (subRepo.isNotBlank()) Text("ریپازیتوری ساب: $subRepo", color = c.muted, style = MaterialTheme.typography.bodySmall)
             Button(onClick = onCreateRepo, enabled = !creatingRepo && githubToken.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                 Text(if (creatingRepo) "در حال ساخت…" else "ساخت / اتصال ریپازیتوری ساب")
             }
-            Text("پس از هر تست موفق، sub.txt و proxy.txt به‌صورت خودکار در این ریپازیتوری منتشر می‌شوند.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text("پس از هر تست موفق، sub.txt و proxy.txt به‌صورت خودکار در این ریپازیتوری منتشر می‌شوند.", color = c.muted, style = MaterialTheme.typography.bodySmall)
         }
-        Text("کانفیگ‌های سازگار با درخواست HTTP واقعی بررسی می‌شوند؛ پروکسی‌های Telegram تست TCP مستقل دارند.", color = Muted)
+        Text("کانفیگ‌های سازگار با درخواست HTTP واقعی بررسی می‌شوند؛ پروکسی‌های Telegram تست TCP مستقل دارند.", color = c.muted)
     }
 }
 
 @Composable
 private fun ChannelsPage(p1: String, p2: String, onPriority1: (String) -> Unit, onPriority2: (String) -> Unit) {
+    val c = LocalPalette.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PageHeader("کانال‌ها", "رتبه اول و دوم، مشابه نسخه ویندوز")
         Panel {
-            Text("کانال‌های رتبه اول", color = Text, fontWeight = FontWeight.Bold)
+            Text("کانال‌های رتبه اول", color = c.text, fontWeight = FontWeight.Bold)
             OutlinedTextField(value = p1, onValueChange = onPriority1, modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp), placeholder = { Text("هر خط یک کانال") })
         }
         Panel {
-            Text("کانال‌های رتبه دوم", color = Text, fontWeight = FontWeight.Bold)
+            Text("کانال‌های رتبه دوم", color = c.text, fontWeight = FontWeight.Bold)
             OutlinedTextField(value = p2, onValueChange = onPriority2, modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp), placeholder = { Text("هر خط یک کانال") })
         }
     }
@@ -384,37 +577,43 @@ private fun ChannelsPage(p1: String, p2: String, onPriority1: (String) -> Unit, 
 
 @Composable
 private fun OutputPage(title: String, rows: List<CheckResult>, file: File?, context: Context) {
+    val c = LocalPalette.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PageHeader(title, "${rows.count { it.ok }} سالم از ${rows.size} مورد")
         if (file != null) Button(onClick = { share(context, file) }, modifier = Modifier.fillMaxWidth()) { Text("اشتراک‌گذاری ${file.name}") }
-        rows.forEach { row ->
-            Surface(color = Card, shape = RoundedCornerShape(14.dp)) {
+        rows.forEach { row ->                Surface(color = c.card, shape = RoundedCornerShape(14.dp)) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("${if (row.ok) "سالم" else "ناموفق"} • ${row.item.protocol.uppercase()} • ${row.ping ?: "-"} ms", color = if (row.ok) Good else Bad, fontWeight = FontWeight.Bold)
-                    Text("${row.item.host}:${row.item.port} • ${row.tester}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                    Text(row.item.raw, color = Text, style = MaterialTheme.typography.labelSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text("${if (row.ok) "سالم" else "ناموفق"} • ${row.item.protocol.uppercase()} • ${row.ping ?: "-"} ms", color = if (row.ok) c.good else c.bad, fontWeight = FontWeight.Bold)
+                    Text("${row.item.host}:${row.item.port} • ${row.tester}", color = c.muted, style = MaterialTheme.typography.bodySmall)
+                    Text(row.item.raw, color = c.text, style = MaterialTheme.typography.labelSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
-        if (rows.isEmpty()) Text("هنوز خروجی ساخته نشده است.", color = Muted)
+        if (rows.isEmpty()) Text("هنوز خروجی ساخته نشده است.", color = c.muted)
     }
 }
 
-@Composable private fun PageHeader(title: String, subtitle: String) = Panel {
-    Text(title, color = Text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
-    Text(subtitle, color = Muted)
+@Composable private fun PageHeader(title: String, subtitle: String) {
+    val c = LocalPalette.current
+    Panel {
+        Text(title, color = c.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
+        Text(subtitle, color = c.muted)
+    }
 }
 
-@Composable private fun Panel(content: @Composable ColumnScope.() -> Unit) = Column(
-    Modifier.fillMaxWidth().background(Card, RoundedCornerShape(18.dp)).padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp), content = content,
-)
+@Composable private fun Panel(content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalPalette.current
+    Column(
+        Modifier.fillMaxWidth().background(c.card, RoundedCornerShape(18.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp), content = content,
+    )
+}
 
 @Composable private fun Metric(label: String, value: Int, color: Color, modifier: Modifier = Modifier) = Column(
     modifier.background(Card, RoundedCornerShape(14.dp)).padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
 ) {
     Text(value.toString(), color = color, fontWeight = FontWeight.Black)
-    Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+    Text(label, color = c.muted, style = MaterialTheme.typography.labelSmall)
 }
 
 @Composable private fun NumberField(label: String, value: Int, onChange: (Int) -> Unit) {
@@ -426,8 +625,9 @@ private fun OutputPage(title: String, rows: List<CheckResult>, file: File?, cont
 }
 
 @Composable private fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val c = LocalPalette.current
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Text, modifier = Modifier.weight(1f))
+        Text(label, color = c.text, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }
@@ -484,7 +684,7 @@ private fun testCandidate(item: Candidate, settings: SettingsState): CheckResult
     var error = "unreachable"
     repeat(settings.attempts.coerceIn(1, 5)) {
         if (!item.proxy && item.xrayJson != null) {
-            runCatching { Libv2ray.measureOutboundDelay(item.xrayJson, settings.checkUrl).toInt() }
+            runCatching { MobileCore.measureDelayMs(item.xrayJson!!, settings.checkUrl) }
                 .onSuccess { if (it >= 0) samples += it else error = "negative_delay" }
                 .onFailure { error = it.javaClass.simpleName }
         } else {
@@ -611,7 +811,7 @@ private fun writeOutputs(root: File, results: List<CheckResult>, settings: Setti
     val configs = alive.filter { !it.item.proxy }.mapIndexed { index, r -> if (settings.renameNames) renameConfig(r.item.raw, "${settings.tagPrefix}-${index + 1}") else r.item.raw }
     val proxies = alive.filter { it.item.proxy }.map { it.item.raw }
     val reportRows = JSONArray().also { array -> results.forEach { r -> array.put(JSONObject().put("raw", r.item.raw).put("source", r.item.source).put("protocol", r.item.protocol).put("host", r.item.host).put("port", r.item.port).put("alive", r.ok).put("ping_ms", r.ping ?: JSONObject.NULL).put("tester", r.tester).put("error", r.error)) } }
-    val report = JSONObject().put("version", VERSION).put("platform", "android").put("generated_at", Instant.now().toString()).put("xray_version", runCatching { Libv2ray.checkVersionX() }.getOrDefault("unknown")).put("results", reportRows)
+    val report = JSONObject().put("version", VERSION).put("platform", "android").put("generated_at", Instant.now().toString()).put("core_version", MobileCore.version()).put("results", reportRows)
     fun file(name: String, value: String) = File(dir, name).apply { writeText(value) }
     return listOf(file("sub.txt", configs.joinToString("\n")), file("proxy.txt", proxies.joinToString("\n")), file("sub_base64.txt", Base64.encodeToString(configs.joinToString("\n").toByteArray(), Base64.NO_WRAP)), file("proxy_base64.txt", Base64.encodeToString(proxies.joinToString("\n").toByteArray(), Base64.NO_WRAP)), file("report.json", report.toString(2)))
 }

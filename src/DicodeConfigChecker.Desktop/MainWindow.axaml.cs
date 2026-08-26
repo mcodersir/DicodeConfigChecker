@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -161,7 +162,17 @@ public partial class MainWindow : Window
 
     private async void CopyConfigs_Click(object? sender, RoutedEventArgs e) => await CopyAsync(ConfigOutput.Text ?? "");
     private async void CopyProxies_Click(object? sender, RoutedEventArgs e) => await CopyAsync(ProxyOutput.Text ?? "");
-    private async Task CopyAsync(string text) { var clipboard = TopLevel.GetTopLevel(this)?.Clipboard; if (clipboard is not null) await clipboard.SetTextAsync(text); SetStatus("در کلیپ‌بورد کپی شد."); }
+    private async Task CopyAsync(string text)
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is not null && !string.IsNullOrEmpty(text))
+        {
+            var data = new DataTransfer();
+            data.Add(DataTransferItem.Create(DataFormat.Text, text));
+            await clipboard.SetDataAsync(data);
+        }
+        SetStatus("در کلیپ‌بورد کپی شد.");
+    }
     private void OpenOutput_Click(object? sender, RoutedEventArgs e) => OpenExternal(UserData.OutputDirectory);
 
     private void ThemeBox_Changed(object? sender, SelectionChangedEventArgs e) { var theme = (AppTheme)Math.Clamp(ThemeBox.SelectedIndex, 0, 2); ApplyTheme(theme); }

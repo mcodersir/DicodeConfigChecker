@@ -18,13 +18,13 @@ concurrency:
 env:
   VERSION: 2.0.0
   CORE_A_VERSION: v26.3.27
-  CORE_B_VERSION: 1.13.15
-  CORE_B_SHA256: 599b296f6e57511d36d2a6f3011aed1a86fa98418578bbb06bd6dc241b5d8877
-  GEO_VERSION: 202608052252
-  CORE_B_SHA256_LINUX_AMD64: a3a3ff223b23c3f4731d0a17cb0ef94c97ce257c70721a5b07dc7ca079203c9f
-  CORE_B_SHA256_DARWIN_AMD64: 817e04f90f941b718fedd965ff05bfe72abfcc62952888b01751a6dec5547e14
-  CORE_B_SHA256_DARWIN_ARM64: 3452d866834c9572389e5ca73e60d4ee45a7d5b79332188c9a9e533c5fd40a6d
-  ANDROID_CORE_COMMIT: ecf84ee82ac975c39852397351d1618a40df7cd2
+  CORE_B_VERSION: 1.13.19
+  CORE_B_SHA256: e011a4def2f5e2b143ed54adb2b1a20a6be407806ab4442f3667f1dd817a2c8d
+  GEO_VERSION: 202608252219
+  CORE_B_SHA256_LINUX_AMD64: ef88a9e577d474210867bd708933d042e9b70106529df2656182c9db90106aa1
+  CORE_B_SHA256_DARWIN_AMD64: 31ee722237d95774e101fbffeae6be6776249c5f7db229ad8ff00b45b22e6a00
+  CORE_B_SHA256_DARWIN_ARM64: 23bf191906f2dfc9f00e9f0092f274f3426ba9377327e903ff94e636b64d0997
+  ANDROID_CORE_COMMIT: c634d1baea97e94320c0bf6a9cf637369c4f11d4
 
 jobs:
   test:
@@ -240,7 +240,7 @@ jobs:
           go mod tidy
           gomobile bind -v -androidapi 26 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' ./
           mkdir -p "$GITHUB_WORKSPACE/android/app/libs"
-          cp libv2ray.aar "$GITHUB_WORKSPACE/android/app/libs/libv2ray.aar"
+          cp libv2ray.aar "$GITHUB_WORKSPACE/android/app/libs/core-mobile.aar"
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.11.1' }
       - name: Lint and build installable APK

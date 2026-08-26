@@ -41,6 +41,17 @@ android {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "META-INF/INDEX.LIST")
         jniLibs.useLegacyPackaging = true
     }
+
+    sourceSets {
+        getByName("main") {
+            // Shared Vazirmatn font files from the repository-level assets folder.
+            assets.srcDir("../../assets/fonts")
+        }
+    }
+
+    androidResources {
+        noCompress += "ttf"
+    }
 }
 
 dependencies {
@@ -55,6 +66,6 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation(files("libs/libv2ray.aar"))
+    implementation(files("libs/core-mobile.aar"))
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
