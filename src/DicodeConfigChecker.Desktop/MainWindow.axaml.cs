@@ -165,9 +165,8 @@ public partial class MainWindow : Window
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
         if (clipboard is not null && !string.IsNullOrEmpty(text))
         {
-            var data = new DataTransfer();
-            data.Add(DataTransferItem.Create(DataFormat.Text, text));
-            await clipboard.SetDataAsync(data);
+            await clipboard.SetTextAsync(text);
+            
         }
         SetStatus("در کلیپ‌بورد کپی شد.");
     }
