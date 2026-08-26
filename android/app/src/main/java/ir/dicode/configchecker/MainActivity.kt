@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.graphics.toArgb
@@ -612,6 +613,7 @@ private fun OutputPage(title: String, rows: List<CheckResult>, file: File?, cont
 @Composable private fun Metric(label: String, value: Int, color: Color, modifier: Modifier = Modifier) = Column(
     modifier.background(Card, RoundedCornerShape(14.dp)).padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
 ) {
+    val c = LocalPalette.current
     Text(value.toString(), color = color, fontWeight = FontWeight.Black)
     Text(label, color = c.muted, style = MaterialTheme.typography.labelSmall)
 }

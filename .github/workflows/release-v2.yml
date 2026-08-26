@@ -136,7 +136,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x64
-          path: DicodeConfigChecker-v${VERSION}-linux-x86_64.tar.gz
+          path: DicodeConfigChecker-v${{ env.VERSION }}-linux-x86_64.tar.gz
           if-no-files-found: error
 
   macos:
@@ -206,8 +206,8 @@ jobs:
         with:
           name: macos
           path: |
-            DicodeConfigChecker-v${VERSION}-macos-x86_64.zip
-            DicodeConfigChecker-v${VERSION}-macos-arm64.zip
+            DicodeConfigChecker-v${{ env.VERSION }}-macos-x86_64.zip
+            DicodeConfigChecker-v${{ env.VERSION }}-macos-arm64.zip
           if-no-files-found: error
 
   android:
