@@ -8,10 +8,10 @@
     <ApplicationIcon Condition="$([MSBuild]::IsOSPlatform('Windows'))">..\..\assets\app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.20" />
     <ProjectReference Include="..\DicodeConfigChecker.Core\DicodeConfigChecker.Core.csproj" />
     <Content Include="..\..\channels.txt" Link="channels.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\runtimes')" />

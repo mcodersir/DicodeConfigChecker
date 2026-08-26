@@ -16,16 +16,9 @@
 - Android light/dark/system theme toggle with minimal vector navigation icons.
 - Android persistent settings, channel lists and theme across app restarts.
 - Android Vazirmatn typography served from the shared repository assets.
-- Happy Eyeballs DNS resolution for faster HTTP connections (IPv4+IPv6 parallel racing).
-- Sniffing enabled in both Xray and sing-box runtime configs for accurate routing.
 
 ### Changed
 
-- **Flat-batch testing**: one runtime process per kind for ALL configs, eliminating repeated process startup overhead.
-- Desktop test parallelism increased from 16 to 32; Android test parallelism increased from 8 to 32.
-- Fetch parallelism increased from 8 to 10.
-- Default attempts reduced from 4 to 3, minimum successes from 3 to 2 — faster scans without sacrificing reliability.
-- Request timeout reduced from 8s to 6s; startup polling interval reduced from 40ms to 15ms.
 - Android collection and profile tests run concurrently with bounded workers.
 - Android reports median latency rather than a mean distorted by outliers.
 - Mobile network core access is wrapped behind a single neutral facade.

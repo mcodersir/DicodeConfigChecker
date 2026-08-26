@@ -121,10 +121,9 @@ private enum class Page(val title: String) {
 private data class SettingsState(
     val perChannelLimit: Int = 20,
     val priorityLimit: Int = 30,
-    val fetchWorkers: Int = 10,
-    val testParallelism: Int = 32,
-    val attempts: Int = 3,
-    val minSuccess: Int = 2,
+    val fetchWorkers: Int = 8,
+    val attempts: Int = 2,
+    val minSuccess: Int = 1,
     val checkUrl: String = "https://www.gstatic.com/generate_204",
     val tagPrefix: String = "t.me/dicodeir",
     val renameNames: Boolean = true,
@@ -403,7 +402,6 @@ private fun settingsToJson(value: SettingsState): String = JSONObject()
     .put("perChannelLimit", value.perChannelLimit)
     .put("priorityLimit", value.priorityLimit)
     .put("fetchWorkers", value.fetchWorkers)
-    .put("testParallelism", value.testParallelism)
     .put("attempts", value.attempts)
     .put("minSuccess", value.minSuccess)
     .put("checkUrl", value.checkUrl)
@@ -419,10 +417,9 @@ private fun settingsFromJson(text: String): SettingsState? = runCatching {
     SettingsState(
         perChannelLimit = obj.optInt("perChannelLimit", 20),
         priorityLimit = obj.optInt("priorityLimit", 30),
-        fetchWorkers = obj.optInt("fetchWorkers", 10),
-        testParallelism = obj.optInt("testParallelism", 32),
-        attempts = obj.optInt("attempts", 3),
-        minSuccess = obj.optInt("minSuccess", 2),
+        fetchWorkers = obj.optInt("fetchWorkers", 8),
+        attempts = obj.optInt("attempts", 2),
+        minSuccess = obj.optInt("minSuccess", 1),
         checkUrl = obj.optString("checkUrl", "https://www.gstatic.com/generate_204"),
         tagPrefix = obj.optString("tagPrefix", "t.me/dicodeir"),
         renameNames = obj.optBoolean("renameNames", true),
@@ -531,8 +528,7 @@ private fun SettingsPage(
         Panel {
             NumberField("تعداد از هر کانال رتبه دوم", value.perChannelLimit) { onChange(value.copy(perChannelLimit = it)) }
             NumberField("تعداد از هر کانال رتبه اول", value.priorityLimit) { onChange(value.copy(priorityLimit = it)) }
-            NumberField("پردازش موازی دریافت", value.fetchWorkers) { onChange(value.copy(fetchWorkers = it)) }
-            NumberField("پردازش موازی تست", value.testParallelism) { onChange(value.copy(testParallelism = it)) }
+            NumberField("پردازش موازی", value.fetchWorkers) { onChange(value.copy(fetchWorkers = it)) }
             NumberField("تعداد تلاش", value.attempts) { onChange(value.copy(attempts = it, minSuccess = value.minSuccess.coerceAtMost(it))) }
             NumberField("حداقل موفقیت", value.minSuccess) { onChange(value.copy(minSuccess = it.coerceAtMost(value.attempts))) }
         }
@@ -648,7 +644,7 @@ private suspend fun collectAll(
     val second = priority2.lines().mapNotNull(::normalizeChannel).distinctBy { it.lowercase() }.filterNot { c -> first.any { it.equals(c, true) } }
     val channels = first.map { it to settings.priorityLimit } + second.map { it to settings.perChannelLimit }
     val found = ConcurrentHashMap<String, Candidate>()
-    val gate = Semaphore(settings.fetchWorkers.coerceIn(1, 32))
+    val gate = Semaphore(settings.fetchWorkers.coerceIn(1, 24))
     val completed = java.util.concurrent.atomic.AtomicInteger(0)
     coroutineScope { channels.map { (channel, limit) -> async {
         val msg = gate.withPermit { runCatching {
@@ -656,7 +652,7 @@ private suspend fun collectAll(
             conn.connectTimeout = 15000; conn.readTimeout = 15000
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 DicodeConfigChecker/$VERSION")
             val html = conn.inputStream.bufferedReader().use { it.readText() }.replace("&amp;", "&")
-            val regex = Regex("""(?:vmess|vless|trojan|ss|ssr|snell|hysteria2|hy2|tuic)://[^\s<>"'`]+|(?:tg://(?:proxy|socks)|https://t\.me/(?:proxy|socks))\?[^\s<>"'`]+""", RegexOption.IGNORE_CASE)
+            val regex = Regex("(?:vmess|vless|trojan|ss|ssr|snell|hysteria2|hy2|tuic)://[^\\s<>\\\"'`]+|(?:tg://(?:proxy|socks)|https://t\\.me/(?:proxy|socks))\\?[^\\s<>\\\"'`]+", RegexOption.IGNORE_CASE)
             var count = 0
             regex.findAll(html).map { it.value.trimEnd(')', ']', '}', ',', '.', ';') }.take(limit).forEach { raw ->
                 parseCandidate(raw, channel)?.let {
@@ -673,7 +669,7 @@ private suspend fun collectAll(
 
 private suspend fun testAll(items: List<Candidate>, settings: SettingsState, update: (Int, Int, String) -> Unit): List<CheckResult> = withContext(Dispatchers.IO) {
     val filtered = items.filter { if (it.proxy) settings.checkProxies else settings.checkConfigs }
-    val gate = Semaphore(settings.testParallelism.coerceIn(1, 48))
+    val gate = Semaphore(settings.fetchWorkers.coerceIn(1, 16))
     val done = java.util.concurrent.atomic.AtomicInteger(0)
     coroutineScope {
         filtered.map { item -> async {
