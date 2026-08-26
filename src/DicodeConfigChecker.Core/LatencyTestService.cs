@@ -107,7 +107,7 @@ public sealed class LatencyTestService(RuntimeLocator runtimes)
             {
                 // Happy Eyeballs: resolve both IPv4 and IPv6, race connections.
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                cts.CancelAfter(context.InitialRequestTimeout);
+                cts.CancelAfter(TimeSpan.FromSeconds(4));
                 var hosts = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cts.Token).ConfigureAwait(false);
                 if (hosts.Length == 0)
                     throw new SocketException((int)SocketError.HostNotFound);
